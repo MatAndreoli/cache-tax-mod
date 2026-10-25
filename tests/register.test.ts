@@ -10,6 +10,8 @@ tier('user')
 const MIN = 60 * 1000
 const HOUR = 60 * MIN
 const START = 1_000_000
+// What the world reports unless a test says otherwise: the one-hour cache the older tests were written for. A test that sets `env` replaces it.
+const ONE_HOUR: Record<string, string> = { CLAUDE_CODE_PROMPT_CACHE_TTL: '1h' }
 
 const session: SessionStartInput = { surface: null, isInteractive: false, cwd: '/work' }
 
@@ -35,7 +37,7 @@ type ForkAnswer = null | ModelForkResult | { read: number; write: number; out?: 
 
 // The world beneath the mod: its store, the engine's answers, and a fork that
 // replies from a script so each test decides what the cache looked like.
-function world(on: On, forkAnswers: ForkAnswer[], opts: { store?: Map<string, unknown>; commands?: string[]; live?: { tokens?: number }; startedAt?: () => number; sid?: string | (() => string); model?: string | (() => string); bandText?: string; theme?: { value: string }; noColor?: boolean; denyTheme?: boolean; writtenTheme?: string; gate?: () => Promise<void>; steps?: TurnUsage[]; storeGate?: (op: 'get' | 'set' | 'delete', key: string) => Promise<void> } = {}) {
+function world(on: On, forkAnswers: ForkAnswer[], opts: { store?: Map<string, unknown>; commands?: string[]; live?: { tokens?: number }; startedAt?: () => number; sid?: string | (() => string); model?: string | (() => string); bandText?: string; theme?: { value: string }; noColor?: boolean; env?: Record<string, string>; ttlSetting?: string; denyTheme?: boolean; writtenTheme?: string; gate?: () => Promise<void>; steps?: TurnUsage[]; storeGate?: (op: 'get' | 'set' | 'delete', key: string) => Promise<void> } = {}) {
   if (opts.store) {
     const store = opts.store
     // A read takes its value first and is delivered after the gate, as a reply can arrive late.
@@ -45,10 +47,12 @@ function world(on: On, forkAnswers: ForkAnswer[], opts: { store?: Map<string, un
     on('store.keys', () => ({ value: [...store.keys()] }))
   } else mock.store(on, {})
   const reads = { theme: 0, env: 0 }
-  on('env.get', ($, e) => { reads.env++; return { value: e.name === 'NO_COLOR' && opts.noColor ? '1' : undefined } })
+  on('env.get', ($, e) => { reads.env++; return { value: e.name === 'NO_COLOR' && opts.noColor ? '1' : (opts.env ?? ONE_HOUR)[e.name] } })
   on('config.list', () => {
     reads.theme++
-    return { value: [{ key: 'theme', label: 'Theme', kind: 'choice', value: opts.theme?.value ?? 'dark', provider: { plugin: 'engine', tier: 'core' }, isLocked: false }] }
+    const rows = [{ key: 'theme', label: 'Theme', kind: 'choice' as const, value: opts.theme?.value ?? 'dark', provider: { plugin: 'engine', tier: 'core' as const }, isLocked: false }]
+    if (opts.ttlSetting) rows.push({ key: 'promptCacheTtl', label: 'Prompt cache TTL', kind: 'choice', value: opts.ttlSetting, provider: { plugin: 'engine', tier: 'core' }, isLocked: false })
+    return { value: rows }
   })
   on('config.set', ($, e) => opts.denyTheme ? { deny: 'theme locked' } : { value: opts.writtenTheme ?? e.value })
   const forks: number[] = []
@@ -107,12 +111,12 @@ describe('cache indicator', () => {
     await $.turn.complete(turn())
     await $.command.run(run('keepwarm', '2h'))
     expect((await ui.find({ type: 'Image' }))?.props.source).toEqual({ png: statusIcons.dark.warm.png })
-    expect(w.reads).toEqual({ theme: 1, env: 1 })
+    expect(w.reads).toEqual({ theme: 1, env: 3 })
     await $.config.set(themeChange('light'))
     expect((await ui.find({ type: 'Image' }))?.props.source).toEqual({ png: statusIcons.light.warm.png })
     await $.config.set(themeChange('dark'))
     expect((await ui.find({ type: 'Image' }))?.props.source).toEqual({ png: statusIcons.dark.warm.png })
-    expect(w.reads).toEqual({ theme: 1, env: 1 })
+    expect(w.reads).toEqual({ theme: 1, env: 3 })
     expect(w.forks.length).toBe(0)
   })
 
@@ -922,7 +926,7 @@ describe('keepwarm input', () => {
       world(on, [])
       await $.session.start(session)
       const r = await $.command.run(run('keepwarm', args))
-      expect(r.text).toBe('keepwarm takes a window such as 6h or 90m, or always, off, or status')
+      expect(r.text).toBe('keepwarm takes a window such as 6h or 90m, or always, off, status, or subagents')
     })
   }
 
@@ -2282,5 +2286,280 @@ describe('a managed plugin above the user tier', () => {
     expect(w.logs).toEqual([])
     expect(w.status.at(-1)).toBe(undefined)
     expect((await $.command.run(run('cache-tax', ''))).text).toMatch(/session     0 cold writes paid/)
+  })
+})
+
+const FIVE: { env: Record<string, string> } = { env: {} }
+
+describe('cache ttl', () => {
+  const card = async ($: Parameters<TestBody>[0]) => (await $.command.run(run('cache-tax', ''))).text ?? ''
+
+  test('is five minutes, said to be assumed, when nothing sets one', async ($, on) => {
+    mock.clock(on, { now: START })
+    world(on, [], { env: {} })
+    await $.session.start(session)
+    expect(await card($)).toMatch(/cache ttl    5m \(assumed, nothing sets one/)
+  })
+
+  test('ENABLE_PROMPT_CACHING_1H asks for the hour', async ($, on) => {
+    mock.clock(on, { now: START })
+    world(on, [], { env: { ENABLE_PROMPT_CACHING_1H: '1' } })
+    await $.session.start(session)
+    expect(await card($)).toMatch(/cache ttl    1h \(read from your Claude Code settings/)
+  })
+
+  test('is read from the environment, the setting and the force switch, in Claude Code\'s order', async ($, on) => {
+    mock.clock(on, { now: START })
+    world(on, [], { env: { CLAUDE_CODE_PROMPT_CACHE_TTL: '5m' } })
+    await $.session.start(session)
+    expect(await card($)).toMatch(/cache ttl    5m/)
+  })
+
+  test('the promptCacheTtl setting counts', async ($, on) => {
+    mock.clock(on, { now: START })
+    world(on, [], { env: {}, ttlSetting: '1h' })
+    await $.session.start(session)
+    expect(await card($)).toMatch(/cache ttl    1h \(read from/)
+  })
+
+  test('FORCE_PROMPT_CACHING_5M beats a one-hour variable', async ($, on) => {
+    mock.clock(on, { now: START })
+    world(on, [], { env: { FORCE_PROMPT_CACHING_5M: '1', CLAUDE_CODE_PROMPT_CACHE_TTL: '1h' } })
+    await $.session.start(session)
+    expect(await card($)).toMatch(/cache ttl    5m/)
+  })
+
+  test('/cache-tax ttl pins one, remembers it, and auto goes back to reading the settings', async ($, on) => {
+    mock.clock(on, { now: START })
+    const store = new Map<string, unknown>()
+    world(on, [], { store })
+    await $.session.start(session)
+    const r = await $.command.run(run('cache-tax', 'ttl 5m'))
+    expect(r.text).toBe('cache ttl 5m: pings every 4m, the default window 1h00m')
+    expect(store.get('ttl')).toBe('5m')
+    expect(await card($)).toMatch(/cache ttl    5m \(set with \/cache-tax ttl/)
+    const back = await $.command.run(run('cache-tax', 'ttl 1h'))
+    expect(back.text).toMatch(/^cache ttl 1h: pings every 50m/)
+    const auto = await $.command.run(run('cache-tax', 'ttl auto'))
+    expect(auto.text).toMatch(/^cache ttl 1h: .*\(read from your Claude Code settings\)/)
+    expect(store.has('ttl')).toBe(false)
+    expect((await $.command.run(run('cache-tax', 'ttl 10m'))).text).toBe('/cache-tax ttl takes 5m, 1h or auto')
+  })
+
+  test('a pinned ttl is restored by the next session', async ($, on) => {
+    mock.clock(on, { now: START })
+    world(on, [], { store: new Map<string, unknown>([['ttl', '5m']]) })
+    await $.session.start(session)
+    expect(await card($)).toMatch(/cache ttl    5m \(set with/)
+  })
+
+  test('at five minutes a ping goes out four minutes after the last request, and the window defaults to an hour', async ($, on) => {
+    const clock = mock.clock(on, { now: START })
+    const w = world(on, [warm, warm], FIVE)
+    await $.session.start(session)
+    expect((await $.command.run(run('keepwarm', ''))).text).toMatch(/^keepwarm on for 1h00m, a ping 4m after each idle stretch/)
+    await $.turn.complete(turn())
+    await clock.advance(3 * MIN)
+    expect(w.forks.length).toBe(0)
+    await clock.advance(1 * MIN)
+    expect(w.forks.length).toBe(1)
+    expect(w.status.at(-1)).toMatch(/keepwarm 56m left · ping in 4m · last ping read 200k/)
+    await clock.advance(4 * MIN)
+    expect(w.forks.length).toBe(2)
+  })
+
+  test('at five minutes the cache is cold after five minutes, and the guard prices the write at the five-minute rate', async ($, on) => {
+    const clock = mock.clock(on, { now: START })
+    world(on, [], FIVE)
+    await $.session.start(session)
+    await $.turn.complete(turn())
+    await clock.advance(6 * MIN)
+    const r = await $.prompt.submit(prompt('recap'))
+    expect(r.drop).toMatch(/went cold 1m ago\. Sending this re-writes up to 200,502 tokens at \$12\.5\/MTok = \$2\.51 \(a warm turn would have cost \$0\.05\)/)
+  })
+
+  test('at five minutes a cache four minutes old is still warm', async ($, on) => {
+    const clock = mock.clock(on, { now: START })
+    world(on, [], FIVE)
+    await $.session.start(session)
+    await $.turn.complete(turn())
+    await clock.advance(4 * MIN)
+    const r = await $.prompt.submit(prompt('recap'))
+    expect(r.drop).toBe(undefined)
+  })
+
+  test('at five minutes a ping period is 1m to 4m', async ($, on) => {
+    mock.clock(on, { now: START })
+    world(on, [], FIVE)
+    await $.session.start(session)
+    expect((await $.command.run(run('keepwarm', '30m every 5m'))).text).toBe('every takes a period from 1m to 4m')
+    expect((await $.command.run(run('keepwarm', '30m every 2m'))).text).toMatch(/^keepwarm on for 30m, a ping 2m after/)
+  })
+
+  test('changing the ttl under an open window re-arms it at the new period', async ($, on) => {
+    const clock = mock.clock(on, { now: START })
+    const w = world(on, [warm], { store: new Map<string, unknown>() })
+    await $.session.start(session)
+    await $.command.run(run('keepwarm', '2h'))
+    await $.turn.complete(turn())
+    await $.command.run(run('cache-tax', 'ttl 5m'))
+    await clock.advance(4 * MIN)
+    expect(w.forks.length).toBe(1)
+  })
+
+  test('a one-hour session still prices a write at the one-hour rate', async ($, on) => {
+    const clock = mock.clock(on, { now: START })
+    world(on, [])
+    await $.session.start(session)
+    await $.turn.complete(turn())
+    await clock.advance(2 * HOUR)
+    const r = await $.prompt.submit(prompt('recap'))
+    expect(r.drop).toMatch(/at \$20\/MTok = \$4\.01/)
+  })
+})
+
+describe('subagents', () => {
+  const mainStep = async ($: Parameters<TestBody>[0], index = 0) => {
+    for await (const c of $.turn.step({ turnId: 'main', index, model: 'claude-fable-5-1', messageCount: 3 })) void c
+  }
+  const agentStep = async ($: Parameters<TestBody>[0], agentId: string) => {
+    for await (const c of $.turn.step({ turnId: 'sub-' + agentId, index: 0, model: 'claude-fable-5-1', messageCount: 2, agentId })) void c
+  }
+  const back = ($: Parameters<TestBody>[0], agentId: string) => $.turn.complete(turn({ agentId }))
+
+  test('are off until asked for: a subagent running past the cache lifetime sends no ping', async ($, on) => {
+    const clock = mock.clock(on, { now: START })
+    const w = world(on, [warm], FIVE)
+    await $.session.start(session)
+    await mainStep($)
+    await agentStep($, 'a1')
+    await clock.advance(10 * MIN)
+    expect(w.forks.length).toBe(0)
+  })
+
+  test('on, remembered, and refused when out of range', async ($, on) => {
+    mock.clock(on, { now: START })
+    const store = new Map<string, unknown>()
+    world(on, [], { store })
+    await $.session.start(session)
+    expect((await $.command.run(run('keepwarm', 'subagents'))).text).toMatch(/^keepwarm subagents off/)
+    expect((await $.command.run(run('keepwarm', 'subagents on'))).text).toMatch(/^keepwarm subagents on: .* a ping every 50m for up to 30m,/)
+    expect(store.get('subagents')).toBe(30 * MIN)
+    expect((await $.command.run(run('keepwarm', 'subagents 45m'))).text).toMatch(/up to 45m/)
+    expect(store.get('subagents')).toBe(45 * MIN)
+    expect((await $.command.run(run('keepwarm', 'subagents 7h'))).text).toMatch(/^keepwarm subagents takes on, off or a window from 1m to 6h00m/)
+    expect((await $.command.run(run('keepwarm', 'subagents off'))).text).toBe('keepwarm subagents off')
+    expect(store.has('subagents')).toBe(false)
+  })
+
+  test('a remembered setting is restored by the next session', async ($, on) => {
+    mock.clock(on, { now: START })
+    world(on, [], { store: new Map<string, unknown>([['subagents', 20 * MIN]]) })
+    await $.session.start(session)
+    expect((await $.command.run(run('keepwarm', 'subagents status'))).text).toMatch(/a window of up to 20m/)
+  })
+
+  test('a subagent starting opens a window that pings the waiting conversation, and its return closes it', async ($, on) => {
+    const clock = mock.clock(on, { now: START })
+    const store = new Map<string, unknown>()
+    const w = world(on, [warm, warm], { ...FIVE, store })
+    await $.session.start(session)
+    await $.command.run(run('keepwarm', 'subagents on'))
+    await mainStep($)
+    await agentStep($, 'a1')
+    expect(w.status.at(-1)).toMatch(/keepwarm 30m left · while a subagent runs · ping in 4m/)
+    expect([...store.keys()].some(k => k.startsWith('deadline'))).toBe(false)
+    await clock.advance(4 * MIN)
+    expect(w.forks.length).toBe(1)
+    await clock.advance(4 * MIN)
+    expect(w.forks.length).toBe(2)
+    await back($, 'a1')
+    expect(w.status.at(-1)).toBe(undefined)
+    await clock.advance(20 * MIN)
+    expect(w.forks.length).toBe(2)
+  })
+
+  test('the window waits for the last of several subagents', async ($, on) => {
+    const clock = mock.clock(on, { now: START })
+    const w = world(on, [warm, warm, warm], { ...FIVE, store: new Map<string, unknown>() })
+    await $.session.start(session)
+    await $.command.run(run('keepwarm', 'subagents on'))
+    await mainStep($)
+    await agentStep($, 'a1')
+    await agentStep($, 'a2')
+    await agentStep($, 'a1')
+    await back($, 'a1')
+    await clock.advance(4 * MIN)
+    expect(w.forks.length).toBe(1)
+    await back($, 'a2')
+    await clock.advance(10 * MIN)
+    expect(w.forks.length).toBe(1)
+  })
+
+  test('the window ends at its cap even while the subagent still runs', async ($, on) => {
+    const clock = mock.clock(on, { now: START })
+    const w = world(on, [warm, warm, warm, warm], { ...FIVE, store: new Map<string, unknown>() })
+    await $.session.start(session)
+    await $.command.run(run('keepwarm', 'subagents 10m'))
+    await mainStep($)
+    await agentStep($, 'a1')
+    await clock.advance(30 * MIN)
+    expect(w.forks.length).toBe(2)
+    expect(w.status.at(-1)).toBe(undefined)
+  })
+
+  test('a window a person opened is left alone, and not closed by a subagent returning', async ($, on) => {
+    const clock = mock.clock(on, { now: START })
+    const w = world(on, [warm, warm], { ...FIVE, store: new Map<string, unknown>() })
+    await $.session.start(session)
+    await $.command.run(run('keepwarm', 'subagents on'))
+    await $.command.run(run('keepwarm', '2h'))
+    await mainStep($)
+    await agentStep($, 'a1')
+    await back($, 'a1')
+    await clock.advance(4 * MIN)
+    expect(w.forks.length).toBe(1)
+    expect(w.status.at(-1)).toMatch(/keepwarm 1h5\dm left/)
+  })
+
+  test('a ping the engine cannot send stops the window with its reason and is not retried by the next subagent', async ($, on) => {
+    const clock = mock.clock(on, { now: START })
+    const w = world(on, [{ isAnswered: false, reason: 'api-error', status: 400, error: 'bad', usage: usage() }, warm], { ...FIVE, store: new Map<string, unknown>() })
+    await $.session.start(session)
+    await $.command.run(run('keepwarm', 'subagents on'))
+    await mainStep($)
+    await agentStep($, 'a1')
+    await clock.advance(4 * MIN)
+    expect(w.forks.length).toBe(1)
+    expect(w.status.at(-1)).toMatch(/keepwarm stopped: the API call failed \(400\)/)
+    await agentStep($, 'a2')
+    await clock.advance(10 * MIN)
+    expect(w.forks.length).toBe(1)
+  })
+
+  test('nothing opens before the conversation has sent a request, or once the cache is already cold', async ($, on) => {
+    const clock = mock.clock(on, { now: START })
+    const w = world(on, [warm], { ...FIVE, store: new Map<string, unknown>() })
+    await $.session.start(session)
+    await $.command.run(run('keepwarm', 'subagents on'))
+    await agentStep($, 'a0')
+    await mainStep($)
+    await clock.advance(6 * MIN)
+    await agentStep($, 'a1')
+    await clock.advance(10 * MIN)
+    expect(w.forks.length).toBe(0)
+    expect(w.status.at(-1)).toBe(undefined)
+  })
+
+  test('turning subagents off closes the window it opened', async ($, on) => {
+    const clock = mock.clock(on, { now: START })
+    const w = world(on, [warm], { ...FIVE, store: new Map<string, unknown>() })
+    await $.session.start(session)
+    await $.command.run(run('keepwarm', 'subagents on'))
+    await mainStep($)
+    await agentStep($, 'a1')
+    await $.command.run(run('keepwarm', 'subagents off'))
+    await clock.advance(10 * MIN)
+    expect(w.forks.length).toBe(0)
   })
 })

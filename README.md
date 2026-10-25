@@ -63,8 +63,10 @@ New to caching? [Anthropic explains how Claude Code uses it](https://code.claude
     /keepwarm always        keep every session warm until six hours after its last turn, remembered across sessions
     /keepwarm 6h every 2m   pinging every two minutes; a testing knob, 1m to 59m, forgotten after this window (with always on, at your next turn)
     /keepwarm status        the warming window, next ping and last receipt
+    /keepwarm subagents on  while a subagent runs and no window is open, ping the waiting conversation (30m cap; `subagents 45m` sets it, `off` stops)
     /keepwarm off           stop, forget the window, and turn always off
     /cache-tax              the card
+    /cache-tax ttl 5m       assume a five-minute main cache (also 1h, or auto to read your Claude Code settings)
     /cache-tax guard warn   show the price and send (the hook's default)
     /cache-tax guard refuse drop a cold send once, the resend goes through (this mod's default)
 
@@ -92,7 +94,7 @@ Validated on Claude Code 2.1.304:
 
     ❯ ./register.ts hooks: config.set{key=theme}, ui.render{component=AbovePrompt}, session.start, session.end, classic.SessionStart, command.run{command=keepwarm}, command.run{command=cache-tax}, prompt.submit, turn.step, turn.complete, session.compact
     ❯ ./register.ts calls: $.clock.after (via arm, ping), $.clock.now, $.command.list, $.command.register, $.config.list, $.env.get, $.model.fork (via ping), $.session.id (via reseat, seat), $.session.model (via seat), $.session.usage, $.store.delete (via endConversation, prune, startWindow, stop), $.store.get, $.store.set, $.ui.invalidate, $.ui.log, $.ui.resolve, $.ui.status
-    ❯ ./register.ts env reads: NO_COLOR
+    ❯ ./register.ts env reads: NO_COLOR, FORCE_PROMPT_CACHING_5M, CLAUDE_CODE_PROMPT_CACHE_TTL
 
 Reach L2, drives Claude. Sees every prompt you type, every model request's timing and every answer's token counts.
 
@@ -110,7 +112,9 @@ Prices are the list table, where Fable 5.1 reads at $0.25, writes the 1h tier at
 ## Limits
 
 - Mods require Claude Code 2.1.287+. They are on by default, but local settings, safe mode or organization policy can prevent them from loading. See [mod controls](https://code.claude.com/docs/en/plugins/mods/overview#turn-mods-on-or-off).
-- The 50-minute schedule needs a one-hour main cache. Included subscription usage has it by default. Other billing paths need [`promptCacheTtl`](https://code.claude.com/docs/en/prompt-caching#choose-the-ttl-yourself) set to `"1h"`.
+- Cache lifetime (this fork): the mod follows `FORCE_PROMPT_CACHING_5M`, `CLAUDE_CODE_PROMPT_CACHE_TTL`, `promptCacheTtl` and `ENABLE_PROMPT_CACHING_1H` (Claude Code's own order), or a value pinned with `/cache-tax ttl 5m|1h`; `/cache-tax ttl auto` goes back to reading them. When nothing sets one it assumes five minutes, the default off a subscription; on a subscription pin `/cache-tax ttl 1h` or set `promptCacheTtl`. The pin only tells the mod what Claude Code does, it changes no setting. It then pings every 4 minutes, prices writes at the five-minute rate (0.625 of the table's one-hour write column), and defaults to a 1h window (30m after a cold write) because a ping every 4 minutes is fifteen reads an hour. A failed ping cannot be retried inside the 1-minute margin, so one busy API response stops the window.
+- Subagents (this fork): `/keepwarm subagents on` is off by default. A subagent's first request opens a window (not over one already open) and the last one returning closes it; the window is never saved. It depends on `$.model.fork` working while the conversation waits on a tool result, which the mock tests cannot show: try one long subagent and watch for `last ping read` or the reason the window stopped.
+- The 50-minute schedule needs a one-hour main cache (the default; see the five-minute note above). Included subscription usage has it by default. Other billing paths need [`promptCacheTtl`](https://code.claude.com/docs/en/prompt-caching#choose-the-ttl-yourself) set to `"1h"`.
 - One transcript-verified return at the default interval, Fable 5.1 on a subscription, 19 September 2026: `/keepwarm` armed at minute 42 of a break, the ping fired at minute 50 and read 157k, and the message sent at minute 62 read 156,886 tokens from cache and wrote 2,255. Claude Code's own cache countdown reset to 58 minutes after the ping, so the fork carried the one-hour TTL. One run, one configuration: it shows the ping kept that cache alive past the hour, not net savings for every setup. Claude Code documents forks in its non-main request bucket, normally five minutes. In this run, the fork still read the one-hour session prefix and reset the native countdown. That is observed behavior in one configuration, not proof that every provider handles the buckets identically.
 - A ping that reads warm proves the cache was warm then. Prefix changes can invalidate the cache regardless of time. The exact effect depends on the model and when Claude Code applies the change; see [Claude Code's cache behavior](https://code.claude.com/docs/en/prompt-caching).
 - Resume fields let the guard check the first ordinary send after resuming. If those fields are absent, the first turn seeds its clock and context.
@@ -145,7 +149,7 @@ claude plugin validate .claude-plugin/plugin.json
 claude plugin test .
 ```
 
-The [160 tests](tests/register.test.ts) use a mock clock and engine. They cover:
+The [183 tests](tests/register.test.ts) use a mock clock and engine. They cover:
 
 - **Guard:** refuse once and resend, warn mode, slash commands, small contexts, prompts nobody typed, resume seeding and cold-write scoring.
 - **Warming:** command defaults and refused windows and periods, always/off, always after `/clear`, always rolling from the last turn, idle resets, usage-based stopping, cold-window expiry and delayed timers after sleep.
