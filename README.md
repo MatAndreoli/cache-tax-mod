@@ -1,17 +1,10 @@
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="site/assets/cache-tax-dark.svg">
-  <img src="site/assets/cache-tax-light.svg" alt="Cache Tax" width="64" height="64">
-</picture>
-
 # Cache Tax for Claude Code
 
 **Keep Claude Code's prompt cache warm during breaks.**
 
 Cache Tax is a Claude Code mod that refreshes your prompt cache while you step away and shows the estimated rewrite cost before a cold send. Run `/keepwarm 90m` before a break. Pings cost tokens; choose a window you expect to return within.
 
-**[Install](#install)** · [Website](https://cachetax.aidojo.si/) · [How it works](#how-it-works) · [Costs and limits](#cost-and-the-plan-limit-question) · [Commands](#commands)
-
-![Real recording of cache-tax stopping a cold send with a $6.61 estimate](site/assets/refusal.gif)
+**[Install](#install)** · [How it works](#how-it-works) · [Costs and limits](#cost-and-the-plan-limit-question) · [Commands](#commands)
 
 A two-line recap in a 330k-token session triggered a **$6.61 estimate**. After resending, the reported cache write was **$6.28**. Recorded on 2.1.1; current wording says “up to” the estimated token count. These are API-equivalent costs, not extra subscription charges.
 
@@ -44,15 +37,11 @@ Windows belong to individual sessions. An already-cold session waits for your ne
 
 ### A recorded warming ping
 
-![Real keepwarm status showing a 75k-token cache read at $0.02](site/assets/keepwarm-receipt.png)
-
 Sonnet 5, 16 September 2026: the status reported **75k tokens read at $0.02**. Nothing appeared in the conversation during the live run. This capture used the one-minute testing interval on 2.0.0; its card's $0.45 rewrite estimate used an older Sonnet price row, versus $0.30 for the same context with the current row. The two-cent ping is a receipt for that session, not a fixed price.
 
 ## Why a short message can cost so much
 
 When the cached prefix expires, even “give me a recap” can trigger a rewrite of the old context before the answer. Cache Tax's Fable 5.1 price row compares a $20 one-hour write with a $0.25 cache read per million tokens: 80x per token, not 80x total savings. See the [pricing assumptions](#cost-and-the-plan-limit-question) and [Anthropic's price table](https://platform.claude.com/docs/en/about-claude/pricing).
-
-[Watch the 23-second overview](docs/assets/cache-cost-explainer.mp4). Its designed scenes label Fable 5.1 list prices; every terminal and status-line pixel comes from the real refusal recording and keep-warm receipt above. The refusal was recorded on 2.1.1 and the keep-warm crop on 2.0.0.
 
 New to caching? [Anthropic explains how Claude Code uses it](https://code.claude.com/docs/en/prompt-caching).
 
@@ -63,7 +52,6 @@ New to caching? [Anthropic explains how Claude Code uses it](https://code.claude
     /keepwarm always        keep every session warm until six hours after its last turn, remembered across sessions
     /keepwarm 6h every 2m   pinging every two minutes; a testing knob, 1m to 59m, forgotten after this window (with always on, at your next turn)
     /keepwarm status        the warming window, next ping and last receipt
-    /keepwarm subagents on  while a subagent runs and no window is open, ping the waiting conversation (30m cap; `subagents 45m` sets it, `off` stops)
     /keepwarm off           stop, forget the window, and turn always off
     /cache-tax              the card
     /cache-tax ttl 5m       assume a five-minute main cache (also 1h, or auto to read your Claude Code settings)
@@ -80,7 +68,7 @@ While keepwarm is armed, the terminal and Desktop Code tab show a row above the 
 
 The row includes the warming window, next ping and last readback. A stopped loop shows a neutral symbol and its reason. `/keepwarm off` or an expired window removes the row. Surveys temporarily take priority, and other mods' content stays in the band. Sessions without this band retain the plain status text.
 
-The cube follows Claude's light or dark theme. Its terminal image also has a contrasting edge for terminal backgrounds that differ from that setting. The embedded assets come from the website's official SVGs; maintainers can regenerate them with `python3 tools/generate-status-icons.py` and `rsvg-convert` installed. No image files are read or fetched at runtime.
+The cube follows Claude's light or dark theme. Its terminal image also has a contrasting edge for terminal backgrounds that differ from that setting. The embedded assets come from the website's official SVGs; they live in `hooks/status-icons.ts`. No image files are read or fetched at runtime.
 
 The mod reads the theme and `NO_COLOR` once when the session starts. Accepted theme changes update the icon immediately; ordinary redraws do not reread either setting. Set `NO_COLOR` before starting the session.
 
@@ -107,13 +95,12 @@ Reach L2, drives Claude. Sees every prompt you type, every model request's timin
 
 ## Cost and the plan-limit question
 
-Prices are the list table, where Fable 5.1 reads at $0.25, writes the 1h tier at $20 and answers at $50 per million tokens; Sonnet 5 has its own row ($0.20, $4, $10). On an API key the arithmetic is plain. A ping bills the cache read, its own few uncached tokens at the base rate, and whatever the model says back at the output rate; the displayed ping cost counts all of it, since a fork takes no output cap and a model at high effort may think before it says "warm". A comeback after the lapse is a write. The card prints the read-only upper bound for your model, 80 pings on Fable 5.1, with the idle that covers at the current ping period; a real ping costs a little more than a read, so the true break-even sits below that number. On a subscription the dollars are a yardstick, not the bill, and how a cache read weighs against the 5-hour and weekly limits is not documented anywhere I could find. Watch the rate-limit row of your status line during the first window.
+Prices are the table at the top of `hooks/register.ts`, in this fork the rates of one provider per million tokens: input, five-minute cache write, cache read and output, for Haiku 5.5, Sonnet 5.5, GPT-6 Luna and three models that cannot write a cache (DeepSeek V4 Flash, V4.1 Flash, FW GLM 5.3 Flash), which bill a cold send as plain input. The one-hour write is computed as twice the input. A model with no row shows `n/a`; add a row to price it. On an API key the arithmetic is plain. A ping bills the cache read, its own few uncached tokens at the base rate, and whatever the model says back at the output rate; the displayed ping cost counts all of it, since a fork takes no output cap and a model at high effort may think before it says "warm". A comeback after the lapse is a write. The card prints the read-only upper bound for your model, 20 pings on Sonnet 5.5 at the one-hour rate, with the idle that covers at the current ping period; a real ping costs a little more than a read, so the true break-even sits below that number. On a subscription the dollars are a yardstick, not the bill, and how a cache read weighs against the 5-hour and weekly limits is not documented anywhere I could find. Watch the rate-limit row of your status line during the first window.
 
 ## Limits
 
 - Mods require Claude Code 2.1.287+. They are on by default, but local settings, safe mode or organization policy can prevent them from loading. See [mod controls](https://code.claude.com/docs/en/plugins/mods/overview#turn-mods-on-or-off).
 - Cache lifetime (this fork): the mod follows `FORCE_PROMPT_CACHING_5M`, `CLAUDE_CODE_PROMPT_CACHE_TTL`, `promptCacheTtl` and `ENABLE_PROMPT_CACHING_1H` (Claude Code's own order), or a value pinned with `/cache-tax ttl 5m|1h`; `/cache-tax ttl auto` goes back to reading them. When nothing sets one it assumes five minutes, the default off a subscription; on a subscription pin `/cache-tax ttl 1h` or set `promptCacheTtl`. The pin only tells the mod what Claude Code does, it changes no setting. It then pings every 4 minutes, prices writes at the five-minute rate (0.625 of the table's one-hour write column), and defaults to a 1h window (30m after a cold write) because a ping every 4 minutes is fifteen reads an hour. A failed ping cannot be retried inside the 1-minute margin, so one busy API response stops the window.
-- Subagents (this fork): `/keepwarm subagents on` is off by default. A subagent's first request opens a window (not over one already open) and the last one returning closes it; the window is never saved. It depends on `$.model.fork` working while the conversation waits on a tool result, which the mock tests cannot show: try one long subagent and watch for `last ping read` or the reason the window stopped.
 - The 50-minute schedule needs a one-hour main cache (the default; see the five-minute note above). Included subscription usage has it by default. Other billing paths need [`promptCacheTtl`](https://code.claude.com/docs/en/prompt-caching#choose-the-ttl-yourself) set to `"1h"`.
 - One transcript-verified return at the default interval, Fable 5.1 on a subscription, 19 September 2026: `/keepwarm` armed at minute 42 of a break, the ping fired at minute 50 and read 157k, and the message sent at minute 62 read 156,886 tokens from cache and wrote 2,255. Claude Code's own cache countdown reset to 58 minutes after the ping, so the fork carried the one-hour TTL. One run, one configuration: it shows the ping kept that cache alive past the hour, not net savings for every setup. Claude Code documents forks in its non-main request bucket, normally five minutes. In this run, the fork still read the one-hour session prefix and reset the native countdown. That is observed behavior in one configuration, not proof that every provider handles the buckets identically.
 - A ping that reads warm proves the cache was warm then. Prefix changes can invalidate the cache regardless of time. The exact effect depends on the model and when Claude Code applies the change; see [Claude Code's cache behavior](https://code.claude.com/docs/en/prompt-caching).
@@ -149,13 +136,13 @@ claude plugin validate .claude-plugin/plugin.json
 claude plugin test .
 ```
 
-The [183 tests](tests/register.test.ts) use a mock clock and engine. They cover:
+The [172 tests](tests/register.test.ts) use a mock clock and engine. They cover:
 
 - **Guard:** refuse once and resend, warn mode, slash commands, small contexts, prompts nobody typed, resume seeding and cold-write scoring.
 - **Warming:** command defaults and refused windows and periods, always/off, always after `/clear`, always rolling from the last turn, idle resets, usage-based stopping, cold-window expiry and delayed timers after sleep.
 - **Session state:** isolated store keys, restored windows, legacy cleanup, clear/compaction resets and subagent isolation.
 - **Managed plugins above the mod:** `/clear`, resume, a restored window and compaction with the classic and compaction events continued beneath the user tier, the same events delivered twice or out of order without a second window, warning or reset, a window and a model change carried through an in-process resume, a transcript that turns old enough to be cold after its resume, a rewind told apart from a compaction, a summary write that is no cold write beside a cold write that is (a guarded send compacted before its first request, two compactions in one turn), an end of the old conversation that overlaps or outlasts the classic resume, and a `/keepwarm` run before the host reports the next conversation's id.
-- **Pricing and display:** a row for every listed model, the Haiku 5.5 long-prompt tier priced per request, Opus 4 and 4.1 apart from Opus 4.5, output and uncached input costs, context counts, duration formatting and the read-only break-even figure.
+- **Pricing and display:** a row for every listed model at the one-hour and five-minute rates, models with no cache write, a model with no row, writes priced per request at each request's own model, output and uncached input costs, context counts, duration formatting and the read-only break-even figure.
 - **Indicator:** terminal images and desktop SVGs, theme selection, warm/cold transitions, resume, compaction, clear, expiry, surveys, other mods' content, text alternatives and `NO_COLOR` fallback.
 - **Preferences:** one read per session, immediate theme updates, denied changes and the effective theme returned by the settings writer.
 - **Fork failures:** a busy API is retried while the cache is warm, a retry that wakes too late is dropped, nothing to fork waits for the next turn, one ping is out at a time, a reply that lands after a request, `/clear` or compaction is discarded, and other failures and the null result returned by older releases stop without retrying.
