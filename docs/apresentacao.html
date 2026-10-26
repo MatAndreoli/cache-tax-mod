@@ -1,0 +1,984 @@
+<title>Cache Tax</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500..800&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: apresentação em seções empilhadas, uma ideia por seção, com a linha do tempo quente/frio do cache como motivo visual. */
+:root {
+  --bg: #eef1f2;
+  --surface: #fcfcfb;
+  --ink: #101417;
+  --ink2: #46515a;
+  --muted: #5f6b74;
+  --line: #d5dce0;
+  --soft: #e3e8eb;
+  --accent: #2a78d6;
+  --s-1h: #2a78d6;
+  --s-5m: #eb6834;
+  --warm-fill: #138a3a;
+  --cold-fill: #c9511f;
+  --warm-ink: #0b6e2c;
+  --cold-ink: #b4461a;
+  --term-bg: #14191d;
+  --term-fg: #e3eaee;
+  --term-dim: #8e9ca6;
+  --display: 'Bricolage Grotesque', 'Segoe UI', system-ui, sans-serif;
+  --body: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1214;
+    --surface: #1a1a19;
+    --ink: #eef1f2;
+    --ink2: #b9c3ca;
+    --muted: #8f9ba4;
+    --line: #2b3238;
+    --soft: #232a2f;
+    --accent: #3987e5;
+    --s-1h: #3987e5;
+    --s-5m: #d95926;
+    --warm-fill: #1f8a45;
+    --cold-fill: #c4501f;
+    --warm-ink: #5ccf86;
+    --cold-ink: #f08a5e;
+    --term-bg: #0a0d0f;
+    --term-fg: #e3eaee;
+    --term-dim: #8e9ca6;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f1214;
+  --surface: #1a1a19;
+  --ink: #eef1f2;
+  --ink2: #b9c3ca;
+  --muted: #8f9ba4;
+  --line: #2b3238;
+  --soft: #232a2f;
+  --accent: #3987e5;
+  --s-1h: #3987e5;
+  --s-5m: #d95926;
+  --warm-fill: #1f8a45;
+  --cold-fill: #c4501f;
+  --warm-ink: #5ccf86;
+  --cold-ink: #f08a5e;
+  --term-bg: #0a0d0f;
+  --term-fg: #e3eaee;
+  --term-dim: #8e9ca6;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font: 400 16px/1.6 var(--body);
+  -webkit-font-smoothing: antialiased;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+a { color: var(--accent); }
+a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible, .scroll:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+code, .mono { font-family: var(--mono); font-size: 0.9em; }
+code { background: var(--soft); padding: 1px 6px; border-radius: 4px; }
+p { margin: 0 0 14px; max-width: 66ch; }
+h1, h2, h3 { font-family: var(--display); margin: 0; text-wrap: balance; letter-spacing: -0.01em; }
+h2 { font-size: clamp(27px, 4.2vw, 42px); line-height: 1.1; font-weight: 700; margin-bottom: 18px; max-width: 24ch; }
+h3 { font-size: 19px; line-height: 1.25; font-weight: 650; margin-bottom: 8px; }
+.eyebrow { font: 500 12px/1 var(--mono); text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); margin-bottom: 16px; }
+.lead { font-size: 19px; line-height: 1.55; color: var(--ink2); max-width: 58ch; }
+.wrap {
+  max-width: 1080px;
+  margin-inline: auto;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+/* uma tela por vez; a rolagem interna só entra como reserva quando a janela é baixa demais */
+.stage { flex: 1; min-height: 0; position: relative; }
+.slide { display: none; position: absolute; inset: 0; overflow-x: hidden; overflow-y: auto; }
+.slide.active { display: flex; animation: slide-in 0.22s ease-out; }
+.slide > .wrap { margin-block: auto; width: 100%; padding-block: 20px; }
+@keyframes slide-in { from { opacity: 0; transform: translateX(10px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .slide.active { animation: none; } }
+
+/* barra de navegação */
+.nav { flex: none; background: var(--bg); border-bottom: 1px solid var(--line); }
+.nav .wrap { display: flex; align-items: center; gap: 20px; height: 52px; }
+.brand { font: 700 17px var(--display); white-space: nowrap; color: var(--ink); text-decoration: none; display: flex; align-items: center; gap: 8px; }
+.brand i { width: 14px; height: 14px; border-radius: 3px; background: var(--warm-fill); display: inline-block; }
+.links { display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none; min-width: 0; }
+.links::-webkit-scrollbar { display: none; }
+.links a { font: 500 13px var(--body); color: var(--ink2); text-decoration: none; padding: 6px 10px; border-radius: 6px; white-space: nowrap; }
+.links a:hover { background: var(--soft); }
+.links a[aria-current="true"] { color: var(--ink); background: var(--soft); }
+
+/* hero */
+h1 { font-size: clamp(48px, min(11vw, 13vh), 108px); line-height: 0.92; font-weight: 800; letter-spacing: -0.03em; margin-bottom: 18px; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 18px 0 22px; }
+.chip { font: 500 12px var(--mono); border: 1px solid var(--line); color: var(--ink2); padding: 4px 10px; border-radius: 999px; background: var(--surface); }
+.fig { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 18px 18px 14px; margin: 0; min-width: 0; }
+.fig.hero { max-width: 760px; }
+.fig figcaption { font-size: 14px; color: var(--ink2); margin-top: 10px; max-width: 80ch; }
+.scroll { overflow-x: auto; min-width: 0; }
+.scroll > svg { display: block; min-width: 640px; width: 100%; height: auto; }
+svg text { font-family: var(--body); }
+.t { font: 600 13px var(--body); fill: var(--ink); }
+.s { font: 400 11.5px var(--mono); fill: var(--muted); }
+.w { font: 600 12px var(--body); fill: #fff; }
+.axis { stroke: var(--muted); stroke-width: 1; }
+.grid { stroke: var(--line); stroke-width: 1; }
+.tick { font: 400 11px var(--mono); fill: var(--muted); }
+.nodebox { fill: var(--surface); stroke: var(--muted); stroke-width: 1.2; }
+.flow { fill: none; stroke: var(--ink2); stroke-width: 1.5; }
+
+/* seções de conteúdo */
+.cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 28px; align-items: start; }
+.cols > * { min-width: 0; }
+.pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: 16px; }
+.pair > * { min-width: 0; }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 22px; min-width: 0; }
+.panel h3 { margin-bottom: 6px; }
+.panel p:last-child { margin-bottom: 0; }
+.big { font: 700 clamp(40px, 6vw, 60px)/1 var(--display); letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.big small { font: 500 14px var(--mono); letter-spacing: 0; color: var(--muted); display: block; margin-top: 8px; }
+.tag { display: inline-flex; align-items: center; gap: 6px; font: 500 12px var(--mono); padding: 2px 9px; border-radius: 999px; border: 1px solid currentColor; }
+.tag::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+.tag.warm { color: var(--warm-ink); }
+.tag.cold { color: var(--cold-ink); }
+.tag.n { color: var(--muted); }
+.note { font-size: 14px; color: var(--ink2); }
+.rule { border-left: 3px solid var(--accent); padding: 2px 0 2px 16px; margin: 0 0 18px; max-width: 62ch; }
+
+.term { background: var(--term-bg); color: var(--term-fg); font: 400 13px/1.55 var(--mono); padding: 14px 16px; border-radius: 8px; overflow-x: auto; white-space: pre; margin: 0; }
+.term .d { color: var(--term-dim); }
+.term .g { color: #5ccf86; }
+.term .o { color: #f08a5e; }
+
+.cmds { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); column-gap: 48px; border-top: 1px solid var(--line); }
+.cmd { display: grid; grid-template-columns: 1fr; gap: 4px; padding: 12px 0; border-bottom: 1px solid var(--line); min-width: 0; }
+.cmd code { background: none; padding: 0; font-weight: 500; font-size: 14px; color: var(--ink); overflow-wrap: anywhere; }
+.cmd span { color: var(--ink2); }
+@media (max-width: 620px) { .cmd { grid-template-columns: 1fr; } }
+
+.steps { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; counter-reset: s; }
+.steps li { display: grid; grid-template-columns: 1fr auto; gap: 8px 14px; align-items: start; padding: 12px 14px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; }
+.steps li > div { min-width: 0; }
+.steps b { font-weight: 600; }
+
+/* custos */
+.assume { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 170px), 1fr)); gap: 10px; margin: 6px 0 28px; }
+.assume div { padding: 12px 14px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; min-width: 0; }
+.assume small { display: block; font: 500 11px var(--mono); text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+.assume b { font: 600 20px var(--mono); font-variant-numeric: tabular-nums; }
+.pricetab { margin-top: 10px; }
+table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line); font-size: 14px; white-space: nowrap; }
+th { font: 500 11.5px var(--mono); text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+td.n, th.n { text-align: right; }
+.tbl { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; overflow-x: auto; min-width: 0; }
+.tbl tr:last-child td { border-bottom: 0; }
+.bars { display: grid; gap: 12px; margin-top: 14px; }
+.bar { display: grid; grid-template-columns: 110px 1fr; gap: 12px; align-items: center; }
+.bar .track { height: 30px; background: var(--soft); border-radius: 4px; position: relative; overflow: hidden; min-width: 0; }
+.bar .fill { height: 100%; border-radius: 0 4px 4px 0; }
+.bar .val { font: 500 14px var(--mono); }
+.bar .lab { font: 500 13px var(--mono); color: var(--ink2); }
+.leg { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 13px; color: var(--ink2); margin: 0 0 8px; }
+.leg i { display: inline-block; width: 22px; height: 0; border-top: 2.5px solid var(--ink2); vertical-align: middle; margin-right: 6px; }
+.leg i.dash { border-top-style: dashed; }
+.chart { position: relative; }
+.chart svg { display: block; width: 100%; height: auto; max-width: 100%; touch-action: pan-y; }
+.tip { position: absolute; pointer-events: none; background: var(--term-bg); color: var(--term-fg); font: 400 12px/1.45 var(--mono); padding: 7px 10px; border-radius: 6px; white-space: nowrap; transform: translate(-50%, -100%); opacity: 0; transition: opacity 0.08s; z-index: 2; }
+.tip.on { opacity: 1; }
+.tip b { font-weight: 500; }
+
+/* calculadora */
+.calc { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 330px), 1fr)); gap: 16px; }
+.calc > * { min-width: 0; }
+.field { display: grid; gap: 6px; margin-bottom: 18px; }
+.field label { font: 500 12px var(--mono); text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); display: flex; justify-content: space-between; gap: 10px; }
+.field label output { color: var(--ink); text-transform: none; letter-spacing: 0; font-size: 14px; }
+select { font: 500 15px var(--body); background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 9px 10px; width: 100%; }
+input[type=range] { width: 100%; accent-color: var(--accent); }
+.seg { display: grid; grid-template-columns: 1fr 1fr; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.seg button { font: 500 14px var(--body); background: var(--bg); color: var(--ink2); border: 0; padding: 9px 10px; cursor: pointer; }
+.seg button + button { border-left: 1px solid var(--line); }
+.seg button[aria-pressed="true"] { background: var(--accent); color: #fff; }
+.res { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 14px; }
+.res div { background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; min-width: 0; }
+.res small { display: block; font: 500 11px var(--mono); text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin-bottom: 4px; }
+.res b { font: 600 22px var(--mono); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.verdict { padding: 14px 16px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); }
+.verdict .tag { margin-bottom: 6px; }
+.verdict p { margin: 0; font-size: 15px; }
+
+.recs { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); column-gap: 48px; border-top: 1px solid var(--line); margin-top: 8px; }
+.recs > div { display: grid; grid-template-columns: 1fr; gap: 4px; padding: 14px 0; border-bottom: 1px solid var(--line); min-width: 0; }
+.recs b { font-weight: 600; }
+.recs span { color: var(--ink2); }
+@media (max-width: 620px) { .recs > div { grid-template-columns: 1fr; } }
+.limits { margin: 0; padding-left: 20px; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 440px), 1fr)); gap: 10px 44px; color: var(--ink2); }
+.limits b { color: var(--ink); font-weight: 600; }
+@media (max-height: 820px) {
+  body { font-size: 15px; }
+  h2 { font-size: clamp(24px, 3.2vw, 34px); margin-bottom: 12px; }
+  h3 { font-size: 17px; }
+  .lead { font-size: 17px; }
+  p { margin-bottom: 10px; }
+  .eyebrow { margin-bottom: 10px; }
+  .panel { padding: 16px; }
+  .fig { padding: 12px 14px 10px; }
+  .big { font-size: clamp(34px, 5vw, 46px); }
+  .steps { gap: 8px; }
+  .steps li { padding: 8px 12px; }
+  .cmd { padding: 8px 0; }
+  .recs > div { padding: 9px 0; }
+  .term { font-size: 12px; padding: 10px 12px; }
+  .assume { margin-bottom: 14px; }
+  .assume div { padding: 8px 12px; }
+  .slide > .wrap { padding-block: 12px; }
+  .chips { margin: 12px 0 14px; }
+  th, td { padding: 6px 10px; }
+  .limits { gap: 6px 44px; }
+}
+.ctrl { flex: none; border-top: 1px solid var(--line); background: var(--bg); }
+.ctrl .wrap { display: flex; align-items: center; gap: 14px; height: 56px; }
+.ctrl button { font: 500 14px var(--body); background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 8px 14px; cursor: pointer; white-space: nowrap; }
+.ctrl button:hover:not(:disabled) { background: var(--soft); }
+.ctrl button:disabled { opacity: 0.4; cursor: default; }
+.prog { flex: 1; height: 4px; background: var(--soft); border-radius: 2px; overflow: hidden; min-width: 30px; }
+.prog i { display: block; height: 100%; width: 0; background: var(--accent); transition: width 0.2s; }
+.count { font: 500 13px var(--mono); color: var(--ink2); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.label { font: 400 13px var(--body); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 24ch; }
+@media (max-width: 700px) { .label { display: none; } .ctrl button { padding: 8px 10px; } }
+</style>
+
+<header class="nav">
+  <div class="wrap">
+    <a class="brand" href="#topo"><i></i>Cache Tax</a>
+    <nav class="links" aria-label="Temas">
+      <a href="#problema">Problema</a>
+      <a href="#proposta">Proposta</a>
+      <a href="#funcionamento">Funcionamento</a>
+      <a href="#comandos">Comandos</a>
+      <a href="#custo">Custo dos pings</a>
+      <a href="#calculadora">Calculadora</a>
+      <a href="#saudavel">Tempo saudável</a>
+      <a href="#limites">Limites</a>
+    </nav>
+  </div>
+</header>
+
+<main class="stage">
+
+<!-- 1 · abertura -->
+<section class="slide active" id="topo" data-nav="topo" data-title="Cache Tax">
+  <div class="wrap">
+    <div class="eyebrow">Mod para Claude Code · v2.5.0</div>
+    <h1>Cache Tax</h1>
+    <p class="lead">Mantém o prompt cache do Claude Code quente durante as pausas e mostra o preço estimado antes de você pagar uma reescrita fria.</p>
+    <div class="chips">
+      <span class="chip">Claude Code 2.1.287+</span>
+      <span class="chip">TypeScript</span>
+      <span class="chip">183 testes</span>
+      <span class="chip">licença MIT</span>
+    </div>
+    <figure class="fig hero">
+      <div class="scroll" tabindex="0" role="region" aria-label="Linha do tempo de uma pausa de 110 minutos">
+        <svg viewBox="0 0 760 240" role="img" aria-label="Pausa de 110 minutos. Sem keepwarm o cache esfria aos 60 minutos e a volta reescreve o contexto por 0,80 dólar. Com keepwarm, pings aos 50 e 100 minutos mantêm o cache quente e a volta custa 0,04 dólar.">
+          <text class="t" x="40" y="28">Sem keepwarm</text>
+          <rect x="40" y="38" width="330" height="28" fill="var(--warm-fill)"/>
+          <text class="w" x="52" y="57">cache quente</text>
+          <rect x="370" y="38" width="330" height="28" fill="var(--cold-fill)"/>
+          <text class="w" x="382" y="57">cache frio</text>
+          <polygon points="645,70 639,80 651,80" fill="var(--ink)"/>
+          <text class="t" x="700" y="98" text-anchor="end">volta aos 110 min</text>
+          <text class="s" x="700" y="114" text-anchor="end">reescreve 200k tokens · US$ 0,80</text>
+
+          <text class="t" x="40" y="146">Com keepwarm</text>
+          <text class="t" x="700" y="146" text-anchor="end">volta aos 110 min</text>
+          <rect x="40" y="154" width="660" height="28" fill="var(--warm-fill)"/>
+          <text class="w" x="52" y="173">cache quente</text>
+          <text class="w" x="688" y="173" text-anchor="end">lê do cache · US$ 0,04</text>
+          <polygon points="315,186 321,192 315,198 309,192" fill="var(--ink)"/>
+          <polygon points="590,186 596,192 590,198 584,192" fill="var(--ink)"/>
+          <text class="s" x="315" y="212" text-anchor="middle">ping</text>
+          <text class="s" x="590" y="212" text-anchor="middle">ping</text>
+
+          <line class="axis" x1="40" x2="700" y1="222" y2="222"/>
+          <g class="tick">
+            <text x="40" y="236" text-anchor="middle">0</text>
+            <text x="205" y="236" text-anchor="middle">30 min</text>
+            <text x="370" y="236" text-anchor="middle">1h</text>
+            <text x="535" y="236" text-anchor="middle">1h30</text>
+            <text x="700" y="236" text-anchor="middle">2h</text>
+          </g>
+        </svg>
+      </div>
+      <figcaption>A mesma pausa, dois finais. Sem aviso o cache expira e a primeira mensagem paga a escrita inteira. Com keepwarm, um ping renova o relógio e a volta lê do cache. Valores para 200k tokens no Sonnet 5.5, com cache de 1 hora.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<!-- 2 · problema -->
+<section class="slide" id="problema" data-nav="problema" data-title="O problema">
+  <div class="wrap">
+    <div class="eyebrow">O que é</div>
+    <h2>Voltar de uma pausa pode custar 20 vezes mais que continuar</h2>
+    <div class="cols">
+      <div>
+        <p>O Claude Code guarda o começo da conversa no prompt cache da Anthropic. Enquanto o cache está vivo, cada turno paga uma leitura barata do contexto inteiro.</p>
+        <p>O cache expira depois de 1 hora de silêncio em planos de assinatura, e depois de 5 minutos em API key, crédito de uso e provedores de nuvem. Passou do prazo, a próxima mensagem reescreve todo o contexto antes de responder, mesmo que seja só "me dá um recap".</p>
+        <p class="note">Os valores em dólar são equivalentes de API. Em assinatura não são uma cobrança extra.</p>
+      </div>
+      <div class="pair">
+        <div class="panel">
+          <span class="tag warm">cache quente</span>
+          <div class="big" style="margin-top:12px">US$ 0,04<small>leitura de 200k tokens</small></div>
+        </div>
+        <div class="panel">
+          <span class="tag cold">cache frio</span>
+          <div class="big" style="margin-top:12px">US$ 0,80<small>escrita de 200k tokens, cache de 1h</small></div>
+        </div>
+      </div>
+    </div>
+    <div class="panel" style="margin-top:16px">
+      <h3>Um caso gravado pelo projeto</h3>
+      <p>Um recap de duas linhas numa sessão de 330 mil tokens gerou uma estimativa de <b>US$ 6,61</b>. Depois do reenvio, a escrita de cache reportada foi de <b>US$ 6,28</b>. O valor é uma estimativa de teto, porque a contagem inclui a saída da última resposta.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 3 · proposta -->
+<section class="slide" id="proposta" data-nav="proposta" data-title="A proposta">
+  <div class="wrap">
+    <div class="eyebrow">Proposta</div>
+    <h2>Evitar a reescrita, ou ao menos avisar antes dela</h2>
+    <p class="lead" style="margin-bottom:24px">Dois mecanismos que se complementam, mais um registro do que o próprio mod gasta.</p>
+    <div class="pair">
+      <div class="panel">
+        <h3>Keepwarm</h3>
+        <p>Antes de uma pausa, você arma uma janela. Depois de um tempo ocioso, o mod envia um ping de baixo custo que lê o cache e renova o relógio. Repete até a janela acabar.</p>
+        <span class="tag warm">previne</span>
+      </div>
+      <div class="panel">
+        <h3>Guard</h3>
+        <p>Se você voltar a frio com um contexto grande, o mod descarta a primeira mensagem e mostra o preço estimado. Você decide: reenviar e pagar, ou começar de uma nota com <code>/clear</code>.</p>
+        <span class="tag cold">avisa</span>
+      </div>
+      <div class="panel">
+        <h3>Contador de pings</h3>
+        <p>Cada ping fica registrado com input, cache read, cache write e output. A sessão mostra o total e os últimos cinco, para você ver quanto o keepwarm gastou.</p>
+        <span class="tag n">audita</span>
+      </div>
+    </div>
+    <p class="note" style="margin-top:20px">Nada sai da máquina além do ping: uma chamada de API sobre o transcript da própria sessão, com um prompt fixo de uma linha. O mod lê apenas o primeiro caractere do seu prompt, para saber se é um comando com barra.</p>
+  </div>
+</section>
+
+<!-- 4 · funcionamento: o ping -->
+<section class="slide" id="funcionamento" data-nav="funcionamento" data-title="Funcionamento: o ping">
+  <div class="wrap">
+    <div class="eyebrow">Funcionamento · o ping</div>
+    <h2>Um ping é uma pergunta sem ferramentas sobre a mesma conversa</h2>
+    <div class="cols">
+      <div>
+        <p>O ping usa o <code>$.model.fork</code>, uma função do engine do Claude Code. Ela repete a última requisição da conversa principal (modelo, system prompt, ferramentas e mensagens) e anexa uma única mensagem: <code>Reply with the single word: warm</code>.</p>
+        <p>Todas as ferramentas ficam negadas e a cauda do fork nunca é cacheada. Como o prefixo é idêntico ao da conversa, o servidor o serve do cache e renova o prazo dele.</p>
+      </div>
+      <div class="panel">
+        <h3>Depois de cada ping o mod confere o usage</h3>
+        <p>O ping está saudável se leu cache e escreveu menos de 10% do que leu. Qualquer outro resultado significa que o prefixo quebrou, e o mod para sozinho em vez de pagar escritas repetidas.</p>
+        <p class="note">O primeiro ping depois de um turno costuma escrever algumas centenas de tokens, a resposta que ainda não estava no cache. É menos de 0,2% da leitura.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 5 · funcionamento: o ciclo -->
+<section class="slide" id="funcionamento-ciclo" data-nav="funcionamento" data-title="Funcionamento: o ciclo">
+  <div class="wrap">
+    <div class="eyebrow">Funcionamento · o ciclo</div>
+    <h2>O ping se repete enquanto o cache estiver saudável</h2>
+    <figure class="fig">
+      <div class="scroll" tabindex="0" role="region" aria-label="Ciclo de um ping">
+        <svg viewBox="0 0 760 250" role="img" aria-label="Ciclo do ping: timer, fork, leitura do usage e decisão. Cache saudável rearma o timer, caso contrário o keepwarm para.">
+          <defs><marker id="ah1" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="currentColor"/></marker></defs>
+          <g color="var(--ink2)">
+            <rect class="nodebox" x="10" y="90" width="150" height="64" rx="8"/>
+            <text class="t" x="85" y="116" text-anchor="middle">Timer</text>
+            <text class="s" x="85" y="133" text-anchor="middle">50 min ociosos</text>
+            <text class="s" x="85" y="147" text-anchor="middle">4 min se o cache é 5m</text>
+
+            <rect class="nodebox" x="200" y="90" width="170" height="64" rx="8"/>
+            <text class="t" x="285" y="116" text-anchor="middle">$.model.fork</text>
+            <text class="s" x="285" y="133" text-anchor="middle">mesmo transcript</text>
+            <text class="s" x="285" y="147" text-anchor="middle">+ prompt fixo</text>
+
+            <rect class="nodebox" x="410" y="90" width="140" height="64" rx="8"/>
+            <text class="t" x="480" y="116" text-anchor="middle">Lê o usage</text>
+            <text class="s" x="480" y="133" text-anchor="middle">input · read</text>
+            <text class="s" x="480" y="147" text-anchor="middle">write · output</text>
+
+            <rect class="nodebox" x="590" y="90" width="160" height="64" rx="8"/>
+            <text class="t" x="670" y="116" text-anchor="middle">Cache saudável?</text>
+            <text class="s" x="670" y="133" text-anchor="middle">read &gt; 0</text>
+            <text class="s" x="670" y="147" text-anchor="middle">write &lt; 10% do read</text>
+
+            <line class="flow" x1="160" y1="122" x2="198" y2="122" marker-end="url(#ah1)"/>
+            <line class="flow" x1="370" y1="122" x2="408" y2="122" marker-end="url(#ah1)"/>
+            <line class="flow" x1="550" y1="122" x2="588" y2="122" marker-end="url(#ah1)"/>
+
+            <rect class="nodebox" x="560" y="10" width="190" height="46" rx="8"/>
+            <text class="t" x="655" y="30" text-anchor="middle">Sim: relógio zera</text>
+            <text class="s" x="655" y="45" text-anchor="middle">agenda o próximo ping</text>
+            <line class="flow" x1="670" y1="90" x2="670" y2="58" marker-end="url(#ah1)"/>
+            <text class="s" x="680" y="76">sim</text>
+            <path class="flow" d="M560 33 H85 V88" marker-end="url(#ah1)"/>
+            <text class="s" x="320" y="26" text-anchor="middle">rearma enquanto a janela estiver aberta</text>
+
+            <rect class="nodebox" x="560" y="192" width="190" height="46" rx="8"/>
+            <text class="t" x="655" y="212" text-anchor="middle">Não: para</text>
+            <text class="s" x="655" y="227" text-anchor="middle">o cache já foi perdido</text>
+            <line class="flow" x1="670" y1="154" x2="670" y2="190" marker-end="url(#ah1)"/>
+            <text class="s" x="680" y="176">não</text>
+
+            <rect class="nodebox" x="200" y="192" width="200" height="46" rx="8"/>
+            <text class="t" x="300" y="212" text-anchor="middle">429, 529 ou 5xx</text>
+            <text class="s" x="300" y="227" text-anchor="middle">tenta de novo em 1, 2 e 4 min</text>
+            <line class="flow" x1="285" y1="154" x2="285" y2="190" marker-end="url(#ah1)"/>
+          </g>
+        </svg>
+      </div>
+      <figcaption>A repetição só acontece enquanto a janela está aberta, o cache não foi perdido e a API não falhou três vezes seguidas.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<!-- 6 · funcionamento: o guard -->
+<section class="slide" id="funcionamento-guard" data-nav="funcionamento" data-title="Funcionamento: o guard">
+  <div class="wrap">
+    <div class="eyebrow">Funcionamento · o guard</div>
+    <h2>O guard bloqueia só o primeiro envio frio e grande</h2>
+    <div class="cols">
+      <ol class="steps">
+        <li><div><b>A mensagem começa com <code>/</code>?</b><br><span class="note">É um comando. Passa direto.</span></div><span class="tag warm">passa</span></li>
+        <li><div><b>Nenhuma pessoa a enviou?</b><br><span class="note">Notificação de tarefa, prompt agendado ou mensagem de outra sessão. Ninguém poderia reenviar, então passa com o preço no log.</span></div><span class="tag warm">passa</span></li>
+        <li><div><b>Cache quente, ou contexto abaixo de 50 mil tokens?</b><br><span class="note">Nada relevante a proteger.</span></div><span class="tag warm">passa</span></li>
+        <li><div><b>Cache frio e contexto grande, primeira vez.</b><br><span class="note">A mensagem é descartada e o preço aparece.</span></div><span class="tag cold">bloqueia</span></li>
+        <li><div><b>Você reenvia.</b><br><span class="note">Passa sem condição. O mod anota a escrita paga e arma keepwarm por 3 horas (6 com <code>always</code>).</span></div><span class="tag warm">passa</span></li>
+      </ol>
+      <div style="min-width:0">
+        <p class="note" style="margin-bottom:8px">A recusa, palavra por palavra:</p>
+        <pre class="term"><span class="o">cache-tax:</span> the prompt cache went cold 2h00m ago.
+Sending this re-writes up to 200,502 tokens at
+$20/MTok = $4.01 (a warm turn would have cost $0.05).
+Send it again to pay it, and keepwarm will then hold
+the cache for 3h00m. Or /clear and start from a note.</pre>
+        <p class="note" style="margin-top:10px">Esse exemplo usa uma linha de preço mais cara que a do Sonnet. O token count é um teto, porque inclui a saída da última resposta.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 7 · comandos -->
+<section class="slide" id="comandos" data-nav="comandos" data-title="Comandos">
+  <div class="wrap">
+    <div class="eyebrow">Principais comandos</div>
+    <h2>Dois comandos cobrem quase todo o uso</h2>
+    <div class="cmds">
+      <div class="cmd"><code>/keepwarm</code><span>Arma a janela padrão: 6 horas com cache de 1h, 1 hora com cache de 5 min.</span></div>
+      <div class="cmd"><code>/cache-tax</code><span>O cartão: estado do cache, contexto, custo frio e quente, break-even e o total de pings.</span></div>
+      <div class="cmd"><code>/keepwarm 90m</code><span>Janela própria. Também aceita <code>2h30m</code> e <code>6h</code>.</span></div>
+      <div class="cmd"><code>/cache-tax ttl 5m|1h|auto</code><span>Diz ao mod qual é o TTL do cache principal. Em assinatura, fixe <code>1h</code>.</span></div>
+      <div class="cmd"><code>/keepwarm always</code><span>Toda sessão fica quente até 6 horas depois do último turno. Fica lembrado entre sessões.</span></div>
+      <div class="cmd"><code>/cache-tax guard warn|refuse</code><span>Só mostrar o preço e enviar, ou bloquear uma vez (padrão).</span></div>
+      <div class="cmd"><code>/keepwarm status</code><span>Janela, próximo ping, o total de pings da sessão e os cinco últimos.</span></div>
+      <div class="cmd"><code>/keepwarm 6h every 2m</code><span>Período de teste entre 1 e 59 minutos, válido só para essa janela.</span></div>
+      <div class="cmd"><code>/keepwarm off</code><span>Para tudo, esquece a janela e desliga o always.</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- 8 · comandos: contador -->
+<section class="slide" id="comandos-contador" data-nav="comandos" data-title="Comandos: contador de pings">
+  <div class="wrap">
+    <div class="eyebrow">Principais comandos · contador de pings</div>
+    <h2>O <code>/keepwarm status</code> mostra o que cada ping custou</h2>
+    <div class="cols">
+      <div>
+        <p>Captura de uma sessão real de teste com um ping por minuto e contexto de 123k tokens. O primeiro ping escreveu 200 tokens, os outros quatro só leram.</p>
+        <p class="note">Cada ping fica entre US$ 0,02 e US$ 0,03. Um ping que não responde mas gastou tokens entra como falho. Uma recusa da API que não gastou nada, como um 429, não entra na conta.</p>
+        <p class="note">Com o keepwarm armado, uma linha acima do prompt mostra o estado: <span class="tag warm">warm</span> <span class="tag cold">cold</span> <span class="tag n">unknown</span>, a janela restante, o próximo ping e o último recibo. Todo estado tem texto, nunca só cor.</p>
+      </div>
+      <pre class="term"><span class="d">❯</span> /keepwarm status
+keepwarm 55m left · ping in 0m · last ping read 123k $0.02
+pings 5 pings · input 80 · read 617k · write 200 · output 20 · $0.12
+  5m ago ok · input 16 · read 123k · write 200 · output 4 · $0.03
+  4m ago ok · input 16 · read 123k · write 0 · output 4 · $0.02
+  3m ago ok · input 16 · read 123k · write 0 · output 4 · $0.02
+  2m ago ok · input 16 · read 123k · write 0 · output 4 · $0.02
+  1m ago ok · input 16 · read 123k · write 0 · output 4 · $0.02</pre>
+    </div>
+  </div>
+</section>
+
+<!-- 9 · custo: visão geral -->
+<section class="slide" id="custo" data-nav="custo" data-title="Custo: gasto por hora">
+  <div class="wrap">
+    <div class="eyebrow">Custo dos pings · gasto por hora</div>
+    <h2>Com cache de 5 minutos, o ping custa 12 vezes mais por hora</h2>
+    <p class="lead" style="margin-bottom:20px">O preço de cada ping é igual nos dois casos. A diferença é a frequência: o mod pinga a cada 4 minutos quando o cache dura 5, e a cada 50 minutos quando dura uma hora.</p>
+    <div class="assume" aria-label="Premissas">
+      <div><small>Modelo</small><b>Sonnet 5.5</b></div>
+      <div><small>Contexto</small><b>200k tokens</b></div>
+      <div><small>Ping (leitura)</small><b>US$ 0,04</b></div>
+      <div><small>Escrita fria · 1h</small><b>US$ 0,80</b></div>
+      <div><small>Escrita fria · 5m</small><b>US$ 0,50</b></div>
+    </div>
+    <div class="panel">
+      <h3>Gasto por hora de aquecimento</h3>
+      <div class="bars" id="bars" aria-label="Gasto por hora de aquecimento"></div>
+      <p class="note" style="margin:14px 0 0">Cache de 5m: 15 pings por hora. Cache de 1h: 1,2 ping por hora. A razão é 50 ÷ 4 = 12,5.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 10 · custo: gráficos -->
+<section class="slide" id="custo-graficos" data-nav="custo" data-title="Custo: acumulado dos pings">
+  <div class="wrap">
+    <div class="eyebrow">Custo dos pings · acumulado</div>
+    <h2>Quanto os pings somam durante uma pausa</h2>
+    <div class="pair" style="grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr))">
+      <div class="panel">
+        <h3>Cache de 5 minutos</h3>
+        <p class="leg"><span><i></i>custo acumulado dos pings</span><span><i class="dash"></i>uma escrita fria</span></p>
+        <div class="chart" id="chart5"></div>
+      </div>
+      <div class="panel">
+        <h3>Cache de 1 hora</h3>
+        <p class="leg"><span><i></i>custo acumulado dos pings</span><span><i class="dash"></i>uma escrita fria</span></p>
+        <div class="chart" id="chart1"></div>
+      </div>
+    </div>
+    <p class="note" style="margin-top:14px">Cada gráfico tem sua própria escala de tempo: 2 horas à esquerda e 24 horas à direita. Passe o cursor ou o dedo sobre a linha para ler o valor.</p>
+  </div>
+</section>
+
+<!-- 11 · custo: empate -->
+<section class="slide" id="custo-empate" data-nav="custo" data-title="Custo: ponto de empate">
+  <div class="wrap">
+    <div class="eyebrow">Custo dos pings · ponto de empate</div>
+    <h2>Quantos pings até igualar uma escrita fria</h2>
+    <div class="pair" style="margin-bottom:22px">
+      <div class="panel">
+        <div class="big" style="color:var(--s-5m)">~12 pings<small>≈ 48 min de pausa</small></div>
+        <p class="note" style="margin-top:12px">Cache de 5 min: escrita 1,25× o input, ping a cada 4 min. O 13º ping, aos 52 minutos, já passa do custo de uma escrita.</p>
+      </div>
+      <div class="panel">
+        <div class="big" style="color:var(--s-1h)">~20 pings<small>≈ 16h40 de pausa</small></div>
+        <p class="note" style="margin-top:12px">Cache de 1h: escrita 2× o input, ping a cada 50 min. O 20º ping, aos 16h40, é o ponto de empate.</p>
+      </div>
+    </div>
+    <p>A conta não depende do tamanho do contexto. Ping e escrita crescem juntos, então o número de pings até o empate é a razão entre o preço da escrita e o da leitura: 4 ÷ 0,20 = 20 em 1h, e 2,5 ÷ 0,20 ≈ 12 em 5m. O contexto muda os dólares, não o ponto de equilíbrio.</p>
+  </div>
+</section>
+
+<!-- 12 · custo: tabela -->
+<section class="slide" id="custo-tabela" data-nav="custo" data-title="Custo: pausa a pausa">
+  <div class="wrap">
+    <div class="eyebrow">Custo dos pings · pausa a pausa</div>
+    <h2>Pausa, pings e custo, lado a lado</h2>
+    <div class="tbl">
+      <table id="tbl"></table>
+    </div>
+    <p class="note" style="margin-top:12px">Contexto de 200k no Sonnet 5.5. O ping inclui os 16 tokens de input e os 4 de output observados na sessão real. Se a pausa for menor que o TTL, o cache sobrevive sozinho e o keepwarm gastaria pings à toa.</p>
+  </div>
+</section>
+
+<!-- 13 · calculadora -->
+<section class="slide" id="calculadora" data-nav="calculadora" data-title="Calculadora">
+  <div class="wrap">
+    <div class="eyebrow">Calculadora</div>
+    <h2>Teste a sua pausa</h2>
+    <div class="calc">
+      <div class="panel">
+        <div class="field">
+          <label for="model">Modelo</label>
+          <select id="model">
+            <option value="sonnet">Sonnet 5.5</option>
+            <option value="haiku">Haiku 5.5</option>
+            <option value="luna">GPT-6 Luna</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Cache principal</label>
+          <div class="seg" role="group" aria-label="TTL do cache">
+            <button type="button" id="ttl5" aria-pressed="false">5 minutos</button>
+            <button type="button" id="ttl1" aria-pressed="true">1 hora</button>
+          </div>
+        </div>
+        <div class="field">
+          <label for="ctx">Contexto <output id="ctxo">200k tokens</output></label>
+          <input id="ctx" type="range" min="50" max="500" step="10" value="200">
+        </div>
+        <div class="field" style="margin-bottom:0">
+          <label for="gap">Tempo de pausa <output id="gapo">2h</output></label>
+          <input id="gap" type="range" min="5" max="1440" step="5" value="120">
+        </div>
+      </div>
+      <div class="panel">
+        <div class="res" aria-live="polite">
+          <div><small>Pings na pausa</small><b id="rPings">2</b></div>
+          <div><small>Custo dos pings</small><b id="rPingCost">US$ 0,08</b></div>
+          <div><small>Escrita fria</small><b id="rCold">US$ 0,80</b></div>
+          <div><small>Empate em</small><b id="rBe">20 pings</b></div>
+        </div>
+        <div class="verdict" id="verdict"></div>
+        <p class="note" style="margin:12px 0 0">A escrita fria é paga no lugar da leitura de volta, então a economia real é um pouco menor que a diferença mostrada. A leitura de volta custa um ping.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 14 · saudável: a regra -->
+<section class="slide" id="saudavel" data-nav="saudavel" data-title="Tempo saudável">
+  <div class="wrap">
+    <div class="eyebrow">Quanto tempo é saudável</div>
+    <h2>A janela é um teto de gasto, não uma previsão</h2>
+    <p class="rule"><b>Janela saudável</b> = (preço da escrita ÷ preço da leitura) × intervalo do ping. Dentro disso, o pior caso, em que você nunca volta, ainda custa menos que uma escrita fria.</p>
+    <div class="pair">
+      <div class="panel">
+        <span class="tag warm">cache de 1h</span>
+        <div class="big" style="margin-top:12px">até ~16h<small>20 × 50 min</small></div>
+        <p class="note" style="margin-top:12px">O padrão de 6 horas gasta no máximo 7 pings, cerca de US$ 0,28 contra US$ 0,80 de uma escrita.</p>
+      </div>
+      <div class="panel">
+        <span class="tag cold">cache de 5 min</span>
+        <div class="big" style="margin-top:12px">até ~48 min<small>12 × 4 min</small></div>
+        <p class="note" style="margin-top:12px">O padrão de 1 hora já passa do limite: 14 pings, cerca de US$ 0,56 contra US$ 0,50 de uma escrita.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 15 · saudável: recomendações -->
+<section class="slide" id="saudavel-regras" data-nav="saudavel" data-title="Tempo saudável: recomendações">
+  <div class="wrap">
+    <div class="eyebrow">Quanto tempo é saudável · recomendações</div>
+    <h2>Como escolher a janela</h2>
+    <div class="recs">
+      <div><b>Cache de 1h</b><span>Use o padrão. Com <code>always</code>, cada turno renova uma janela de 6 horas, então uma noite esquecida custa no máximo 7 pings depois do último turno.</span></div>
+      <div><b>Cache de 5 min</b><span>Prefira <code>/keepwarm 30m</code> ou <code>45m</code>. A janela de 30 minutos custa 7 pings, cerca de US$ 0,28. Depois de uma escrita fria paga, o mod arma 30 minutos sozinho.</span></div>
+      <div><b>Pausa longa com 5m</b><span>Não vale aquecer. Duas horas custam 29 pings, cerca de US$ 1,16, contra US$ 0,50 de uma escrita. Aceite a escrita, ou configure <code>promptCacheTtl</code> como <code>"1h"</code>.</span></div>
+      <div><b>Escolha pelo retorno esperado</b><span>Arme o tempo em que você realmente espera voltar, não o máximo. Janela de 2 horas para um almoço de 2 horas.</span></div>
+      <div><b>Troca do TTL</b><span>A escrita de 1h custa 2× o input, contra 1,25× na de 5 min. Cada escrita fria fica 60% mais cara, mas o cache dura 12 vezes mais e o aquecimento fica 12,5 vezes mais barato.</span></div>
+      <div><b>Contexto pequeno</b><span>Abaixo de 50 mil tokens o guard não age, e uma escrita custa centavos. O keepwarm só compensa em sessões grandes.</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- 16 · limites -->
+<section class="slide" id="limites" data-nav="limites" data-title="Limites e cuidados">
+  <div class="wrap">
+    <div class="eyebrow">Limites e cuidados</div>
+    <h2>O que o mod estima e o que ele não prova</h2>
+    <ul class="limits">
+      <li><b>Pings custam tokens.</b> Isso inclui o output, que não tem teto no fork. Em assinatura, o peso de uma leitura de cache nos limites de 5 horas e semanal não está documentado. Observe o limite de uso durante a primeira janela.</li>
+      <li><b>O estado quente ou frio é uma estimativa.</b> O mod usa um relógio próprio (último request mais o TTL), não consulta o servidor. Um ping que lê quente prova só que o cache estava quente naquele momento.</li>
+      <li><b>O TTL precisa estar certo.</b> Se nada o define, o mod assume 5 minutos, o padrão fora da assinatura. Em assinatura rode <code>/cache-tax ttl 1h</code>, ou um ping de 50 minutos não protege um cache de 5.</li>
+      <li><b>Os dólares vêm de uma tabela de preços do mod.</b> Um modelo sem linha aparece como <code>n/a</code>, e os tokens continuam somados. Não é a sua fatura.</li>
+      <li><b>O ping usa um bucket de cache diferente do principal.</b> Numa configuração testada o fork leu o prefixo de 1 hora e renovou o relógio. É uma observação, não uma garantia para todo provedor.</li>
+      <li><b>Os contadores vivem em memória.</b> O total de pings e o de escritas frias começam do zero a cada processo e a cada <code>/clear</code>.</li>
+      <li><b>Como validar na sua sessão.</b> Rode <code>/keepwarm 1h every 1m</code>, espere alguns pings e compare o total do <code>/cache-tax</code> com o <code>/usage</code>.</li>
+    </ul>
+    <p class="note" style="margin-top:16px">Cache Tax 2.5.0 · MIT · 183 testes com relógio e engine simulados. Os gráficos mostram o modelo de custo do mod para 200k tokens no Sonnet 5.5.</p>
+  </div>
+</section>
+
+</main>
+
+<footer class="ctrl">
+  <div class="wrap">
+    <button type="button" id="prev" aria-label="Tela anterior">← Anterior</button>
+    <div class="prog" aria-hidden="true"><i id="barfill"></i></div>
+    <span class="count" id="count">1 / 16</span>
+    <span class="label" id="label">Cache Tax</span>
+    <button type="button" id="next" aria-label="Próxima tela">Próxima →</button>
+  </div>
+</footer>
+
+<script>
+(function () {
+  var MODELS = {
+    sonnet: { inp: 2, w5: 2.5, read: 0.2, out: 10 },
+    haiku: { inp: 0.5, w5: 0.63, read: 0.05, out: 2.5 },
+    luna: { inp: 0.1, w5: 0.13, read: 0.01, out: 0.5 }
+  };
+  var TTLS = { '5m': { min: 5, every: 4 }, '1h': { min: 60, every: 50 } };
+  var OVER_IN = 16, OVER_OUT = 4;
+
+  function wRate(m, t) { return t === '5m' ? m.w5 : m.inp * 2; }
+  function pingCost(m, c) { return (c * m.read + OVER_IN * m.inp + OVER_OUT * m.out) / 1e6; }
+  function coldCost(m, t, c) { return c * wRate(m, t) / 1e6; }
+  function pingsFor(T, every) { return Math.max(0, Math.ceil(T / every) - 1); }
+  function usd(n, d) { return 'US$ ' + n.toFixed(d == null ? 2 : d).replace('.', ','); }
+  function fmtMin(m) {
+    var h = Math.floor(m / 60), r = Math.round(m % 60);
+    if (h === 0) return r + ' min';
+    return r ? h + 'h' + String(r).padStart(2, '0') : h + 'h';
+  }
+  function fmtTok(k) { return k + 'k tokens'; }
+
+  var SONNET = MODELS.sonnet, CTX = 200000;
+
+  /* barras de gasto por hora */
+  (function bars() {
+    var el = document.getElementById('bars');
+    if (!el) return;
+    var p = pingCost(SONNET, CTX);
+    var rows = [
+      { lab: 'Cache de 5m', v: p * 60 / 4, color: 'var(--s-5m)' },
+      { lab: 'Cache de 1h', v: p * 60 / 50, color: 'var(--s-1h)' }
+    ];
+    var max = rows[0].v;
+    el.innerHTML = rows.map(function (r) {
+      return '<div class="bar"><span class="lab">' + r.lab + '</span><div style="display:flex;align-items:center;gap:12px;min-width:0">' +
+        '<div class="track" style="flex:1"><div class="fill" style="width:' + (r.v / max * 100).toFixed(1) + '%;background:' + r.color + '"></div></div>' +
+        '<span class="val">' + usd(r.v, r.v < 0.1 ? 3 : 2) + '/h</span></div></div>';
+    }).join('');
+  })();
+
+  /* gráficos de custo acumulado dos pings */
+  function drawChart(el, c) {
+    var W = 520, H = 300, L = 50, R = 14, T = 18, B = 38;
+    var pw = W - L - R, ph = H - T - B;
+    function X(t) { return L + pw * t / c.xMax; }
+    function Y(v) { return T + ph * (1 - v / c.yMax); }
+    var g = '';
+    c.yTicks.forEach(function (v) {
+      g += '<line class="grid" x1="' + L + '" x2="' + (W - R) + '" y1="' + Y(v) + '" y2="' + Y(v) + '"/>' +
+        '<text class="tick" x="' + (L - 8) + '" y="' + (Y(v) + 4) + '" text-anchor="end">' + v.toFixed(1).replace('.', ',') + '</text>';
+    });
+    c.xTicks.forEach(function (t) {
+      g += '<line class="axis" x1="' + X(t) + '" x2="' + X(t) + '" y1="' + (T + ph) + '" y2="' + (T + ph + 4) + '"/>' +
+        '<text class="tick" x="' + X(t) + '" y="' + (H - 16) + '" text-anchor="middle">' + fmtMin(t) + '</text>';
+    });
+    g += '<line class="axis" x1="' + L + '" x2="' + (W - R) + '" y1="' + (T + ph) + '" y2="' + (T + ph) + '"/>';
+    g += '<text class="tick" x="' + L + '" y="10" text-anchor="start">US$ acumulados</text>';
+    g += '<text class="tick" x="' + (W - R) + '" y="' + (H - 2) + '" text-anchor="end">tempo de pausa</text>';
+
+    // marca da janela padrão
+    g += '<line x1="' + X(c.winT) + '" x2="' + X(c.winT) + '" y1="' + T + '" y2="' + (T + ph) + '" stroke="var(--muted)" stroke-width="1" stroke-dasharray="2 4"/>' +
+      '<text class="tick" x="' + (X(c.winT) + 5) + '" y="' + (T + 24) + '">' + c.winLabel + '</text>';
+
+    // linha da escrita fria
+    g += '<line x1="' + L + '" x2="' + (W - R) + '" y1="' + Y(c.cold) + '" y2="' + Y(c.cold) + '" stroke="' + c.color + '" stroke-width="1.5" stroke-dasharray="6 4"/>' +
+      '<text class="tick" x="' + (W - R) + '" y="' + (Y(c.cold) - 6) + '" text-anchor="end" style="fill:var(--ink)">escrita fria ' + usd(c.cold) + '</text>';
+
+    // linha em degraus
+    var d = 'M' + X(0) + ' ' + Y(0), k = 0;
+    while ((k + 1) * c.every <= c.xMax) { k++; d += ' H' + X(k * c.every) + ' V' + Y(k * c.p); }
+    d += ' H' + X(c.xMax);
+    g += '<path d="' + d + '" fill="none" stroke="' + c.color + '" stroke-width="2" stroke-linejoin="round"/>';
+
+    // cruzamento
+    var kc = Math.ceil(c.cold / c.p), tc = kc * c.every;
+    if (tc <= c.xMax) {
+      g += '<circle cx="' + X(tc) + '" cy="' + Y(kc * c.p) + '" r="5" fill="' + c.color + '" stroke="var(--surface)" stroke-width="2"/>' +
+        '<text class="tick" x="' + (c.crossBelow ? X(tc) + 10 : X(tc) - 9) + '" y="' + (Y(kc * c.p) + (c.crossBelow ? 20 : -9)) + '" text-anchor="' + (c.crossBelow ? 'start' : 'end') + '" style="fill:var(--ink)">' + kc + 'º ping · ' + fmtMin(tc) + '</text>';
+    }
+    g += '<line id="' + c.id + 'x" x1="0" x2="0" y1="' + T + '" y2="' + (T + ph) + '" stroke="var(--ink2)" stroke-width="1" visibility="hidden"/>' +
+      '<circle id="' + c.id + 'd" r="4.5" fill="' + c.color + '" stroke="var(--surface)" stroke-width="2" visibility="hidden"/>' +
+      '<rect id="' + c.id + 'h" x="' + L + '" y="' + T + '" width="' + pw + '" height="' + ph + '" fill="transparent"/>';
+
+    el.innerHTML = '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="' + c.aria + '">' + g + '</svg><div class="tip" id="' + c.id + 't"></div>';
+
+    var svg = el.querySelector('svg'), tip = el.querySelector('.tip');
+    var ln = svg.querySelector('#' + c.id + 'x'), dot = svg.querySelector('#' + c.id + 'd'), hit = svg.querySelector('#' + c.id + 'h');
+    function move(ev) {
+      var r = svg.getBoundingClientRect();
+      var sx = (ev.clientX - r.left) * W / r.width;
+      var t = Math.min(c.xMax, Math.max(0, (sx - L) / pw * c.xMax));
+      var n = Math.floor(t / c.every), cost = n * c.p;
+      ln.setAttribute('x1', X(t)); ln.setAttribute('x2', X(t)); ln.setAttribute('visibility', 'visible');
+      dot.setAttribute('cx', X(t)); dot.setAttribute('cy', Y(cost)); dot.setAttribute('visibility', 'visible');
+      tip.innerHTML = '<b>' + fmtMin(t) + ' de pausa</b><br>' + n + ' pings · ' + usd(cost) + '<br>' + (cost >= c.cold ? 'acima' : 'abaixo') + ' de uma escrita fria';
+      tip.style.left = Math.min(85, Math.max(15, X(t) / W * 100)) + '%';
+      tip.style.top = 'max(30%, calc(' + (Y(cost) / H * 100) + '% - 10px))';
+      tip.classList.add('on');
+    }
+    function leave() { tip.classList.remove('on'); ln.setAttribute('visibility', 'hidden'); dot.setAttribute('visibility', 'hidden'); }
+    hit.addEventListener('pointermove', move);
+    hit.addEventListener('pointerdown', move);
+    hit.addEventListener('pointerleave', leave);
+  }
+
+  var p5 = pingCost(SONNET, CTX), cold5 = coldCost(SONNET, '5m', CTX), cold1 = coldCost(SONNET, '1h', CTX);
+  var c5 = document.getElementById('chart5'), c1 = document.getElementById('chart1');
+  if (c5) drawChart(c5, {
+    id: 'c5', xMax: 120, yMax: 1.2, yTicks: [0, 0.2, 0.4, 0.6, 0.8, 1.0, 1.2], xTicks: [0, 30, 60, 90, 120],
+    every: 4, p: p5, cold: cold5, color: 'var(--s-5m)', winT: 60, winLabel: 'janela padrão 1h',
+    aria: 'Custo acumulado dos pings com cache de 5 minutos em 2 horas. Passa do custo de uma escrita fria de 0,50 dólar no 13º ping, aos 52 minutos.'
+  });
+  if (c1) drawChart(c1, {
+    id: 'c1', xMax: 1440, yMax: 1.2, yTicks: [0, 0.2, 0.4, 0.6, 0.8, 1.0, 1.2], xTicks: [0, 240, 480, 720, 960, 1200, 1440],
+    every: 50, p: p5, cold: cold1, color: 'var(--s-1h)', winT: 360, winLabel: 'janela padrão 6h', crossBelow: true,
+    aria: 'Custo acumulado dos pings com cache de 1 hora em 24 horas. Chega ao custo de uma escrita fria de 0,80 dólar no 20º ping, aos 16 horas e 40 minutos.'
+  });
+
+  /* tabela lado a lado */
+  (function table() {
+    var el = document.getElementById('tbl');
+    if (!el) return;
+    var Ts = [30, 60, 120, 240, 360, 720, 1440];
+    function cell(T, ttl, cold) {
+      var cfg = TTLS[ttl], n = pingsFor(T, cfg.every), cost = n * p5;
+      var state, cls;
+      if (T < cfg.min) { state = 'cache vivo'; cls = 'n'; }
+      else if (cost < cold) { state = 'compensa'; cls = 'warm'; }
+      else { state = 'não compensa'; cls = 'cold'; }
+      return '<td class="n">' + n + '</td><td class="n">' + usd(cost) + '</td><td><span class="tag ' + cls + '">' + state + '</span></td>';
+    }
+    var h = '<thead><tr><th rowspan="2">Pausa</th><th colspan="3" style="color:var(--s-5m)">Cache de 5 min · escrita ' + usd(cold5) + '</th><th colspan="3" style="color:var(--s-1h)">Cache de 1 h · escrita ' + usd(cold1) + '</th></tr>' +
+      '<tr><th class="n">Pings</th><th class="n">Custo</th><th>Vs escrita</th><th class="n">Pings</th><th class="n">Custo</th><th>Vs escrita</th></tr></thead><tbody>';
+    Ts.forEach(function (T) {
+      h += '<tr><td><b>' + fmtMin(T) + '</b></td>' + cell(T, '5m', cold5) + cell(T, '1h', cold1) + '</tr>';
+    });
+    el.innerHTML = h + '</tbody>';
+  })();
+
+  /* calculadora */
+  (function calc() {
+    var model = document.getElementById('model'), ctx = document.getElementById('ctx'), gap = document.getElementById('gap');
+    var b5 = document.getElementById('ttl5'), b1 = document.getElementById('ttl1');
+    if (!model || !ctx || !gap) return;
+    var ttl = '1h';
+    function set(t) {
+      ttl = t;
+      b5.setAttribute('aria-pressed', t === '5m' ? 'true' : 'false');
+      b1.setAttribute('aria-pressed', t === '1h' ? 'true' : 'false');
+      render();
+    }
+    function render() {
+      var m = MODELS[model.value], cfg = TTLS[ttl], c = Number(ctx.value) * 1000, T = Number(gap.value);
+      document.getElementById('ctxo').textContent = fmtTok(ctx.value);
+      document.getElementById('gapo').textContent = fmtMin(T);
+      var p = pingCost(m, c), cold = coldCost(m, ttl, c), n = pingsFor(T, cfg.every), cost = n * p;
+      var be = Math.floor(wRate(m, ttl) / m.read);
+      document.getElementById('rPings').textContent = n;
+      document.getElementById('rPingCost').textContent = usd(cost);
+      document.getElementById('rCold').textContent = usd(cold);
+      document.getElementById('rBe').textContent = be + ' pings';
+      var v = document.getElementById('verdict'), tag, cls, text;
+      if (T < cfg.min) {
+        cls = 'n'; tag = 'cache vivo';
+        text = 'Com ' + fmtMin(T) + ' de pausa o cache de ' + (ttl === '5m' ? '5 minutos' : '1 hora') + ' ainda está vivo. Não há escrita a evitar, e um keepwarm armado gastaria ' + n + ' ' + (n === 1 ? 'ping' : 'pings') + ' à toa.';
+      } else if (cost < cold) {
+        cls = 'warm'; tag = 'compensa';
+        text = n + ' ' + (n === 1 ? 'ping custa' : 'pings custam') + ' ' + usd(cost) + ', contra ' + usd(cold) + ' de uma escrita fria. Diferença de ' + usd(cold - cost) + ' a seu favor, antes da leitura de volta.';
+      } else {
+        cls = 'cold'; tag = 'não compensa';
+        text = n + ' pings custam ' + usd(cost) + ', mais que os ' + usd(cold) + ' de uma escrita fria. Para essa pausa, aceite a escrita' + (ttl === '5m' ? ' ou configure o cache de 1 hora.' : '.');
+      }
+      v.innerHTML = '<span class="tag ' + cls + '">' + tag + '</span><p>' + text + '</p>';
+    }
+    model.addEventListener('change', render);
+    ctx.addEventListener('input', render);
+    gap.addEventListener('input', render);
+    b5.addEventListener('click', function () { set('5m'); });
+    b1.addEventListener('click', function () { set('1h'); });
+    render();
+  })();
+
+  /* telas: uma por vez, com hash, setas, botões e gesto de arrastar */
+  var slides = Array.prototype.slice.call(document.querySelectorAll('.slide'));
+  var links = Array.prototype.slice.call(document.querySelectorAll('.links a'));
+  var prev = document.getElementById('prev'), next = document.getElementById('next');
+  var bar = document.getElementById('barfill'), count = document.getElementById('count'), label = document.getElementById('label');
+  var cur = -1;
+  var canZoom = !!(window.CSS && CSS.supports && CSS.supports('zoom', '1'));
+
+  /* reduz a escala da tela só o quanto for preciso para caber sem rolar */
+  function fit() {
+    if (!canZoom || cur < 0) return;
+    var s = slides[cur], w = s.firstElementChild;
+    w.style.zoom = '';
+    var k = (s.clientHeight - 4) / w.offsetHeight;
+    w.style.zoom = k < 1 ? Math.max(k, 0.6).toFixed(3) : '';
+  }
+
+  function indexOf(id) {
+    for (var i = 0; i < slides.length; i++) if (slides[i].id === id) return i;
+    return -1;
+  }
+
+  function show(i, silent) {
+    i = Math.max(0, Math.min(slides.length - 1, i));
+    if (i === cur) return;
+    slides.forEach(function (s, k) { s.classList.toggle('active', k === i); });
+    cur = i;
+    var s = slides[i], theme = s.getAttribute('data-nav');
+    s.scrollTop = 0;
+    fit();
+    links.forEach(function (a) {
+      var on = a.getAttribute('href') === '#' + theme;
+      a.setAttribute('aria-current', on ? 'true' : 'false');
+      if (on && a.scrollIntoView) { try { a.scrollIntoView({ block: 'nearest', inline: 'nearest' }); } catch (e) {} }
+    });
+    count.textContent = (i + 1) + ' / ' + slides.length;
+    label.textContent = s.getAttribute('data-title') || '';
+    bar.style.width = ((i + 1) / slides.length * 100) + '%';
+    prev.disabled = i === 0;
+    next.disabled = i === slides.length - 1;
+    if (!silent) { try { history.replaceState(null, '', '#' + s.id); } catch (e) {} }
+  }
+
+  show(Math.max(0, indexOf(location.hash.slice(1))), true);
+  window.addEventListener('resize', fit);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(fit);
+  window.addEventListener('hashchange', function () {
+    var i = indexOf(location.hash.slice(1));
+    if (i >= 0) show(i, true);
+  });
+
+  document.addEventListener('click', function (ev) {
+    var a = ev.target.closest ? ev.target.closest('a[href^="#"]') : null;
+    if (!a) return;
+    var i = indexOf(a.getAttribute('href').slice(1));
+    if (i < 0) return;
+    ev.preventDefault();
+    show(i);
+  });
+  prev.addEventListener('click', function () { show(cur - 1); });
+  next.addEventListener('click', function () { show(cur + 1); });
+
+  document.addEventListener('keydown', function (ev) {
+    var t = ev.target, tg = t && t.tagName;
+    if (tg === 'INPUT' || tg === 'SELECT' || tg === 'TEXTAREA' || ev.altKey || ev.ctrlKey || ev.metaKey) return;
+    if (t && t.classList && t.classList.contains('scroll')) return;
+    var k = ev.key;
+    if (k === 'ArrowRight' || k === 'PageDown') show(cur + 1);
+    else if (k === 'ArrowLeft' || k === 'PageUp') show(cur - 1);
+    else if (k === 'Home') show(0);
+    else if (k === 'End') show(slides.length - 1);
+    else return;
+    ev.preventDefault();
+  });
+
+  var sx = 0, sy = 0, tracking = false, stage = document.querySelector('.stage');
+  stage.addEventListener('touchstart', function (ev) {
+    var el = ev.target;
+    tracking = !(el.closest && el.closest('input, select, .chart, .scroll, .tbl, .term'));
+    if (ev.touches.length !== 1) tracking = false;
+    sx = ev.touches[0].clientX; sy = ev.touches[0].clientY;
+  }, { passive: true });
+  stage.addEventListener('touchend', function (ev) {
+    if (!tracking) return;
+    var dx = ev.changedTouches[0].clientX - sx, dy = ev.changedTouches[0].clientY - sy;
+    if (Math.abs(dx) > 60 && Math.abs(dy) < 40) show(cur + (dx < 0 ? 1 : -1));
+  }, { passive: true });
+})();
+</script>
