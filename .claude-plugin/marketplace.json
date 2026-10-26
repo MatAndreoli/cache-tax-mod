@@ -1,0 +1,15 @@
+{
+  "name": "cache-tax-mod",
+  "owner": {
+    "name": "Matheus Andreoli"
+  },
+  "description": "Local marketplace for the cache-tax Claude Code mod.",
+  "plugins": [
+    {
+      "name": "cache-tax",
+      "source": "./",
+      "description": "A Claude Code mod that keeps the prompt cache warm during breaks and stops a cold send once with its estimated rewrite cost.",
+      "version": "2.4.0"
+    }
+  ]
+}
