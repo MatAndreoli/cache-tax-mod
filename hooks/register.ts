@@ -603,7 +603,9 @@ export const register: Register = on => {
 
   on('session.start', async ($, e, next) => {
     const r = await next(e)
-    s.hasBand = e.surface === 'terminal' || e.surface === 'desktop'
+    // The VS Code extension reports no surface, so its entrypoint says where it runs. Read only when the surface is unknown.
+    const inVscode = e.surface !== 'terminal' && e.surface !== 'desktop' && await $.env.get('CLAUDE_CODE_ENTRYPOINT') === 'claude-vscode'
+    s.hasBand = e.surface === 'terminal' || e.surface === 'desktop' || inVscode
     const rows = await $.config.list()
     if (s.hasBand) {
       const theme = rows.find(row => row.key === 'theme')?.value

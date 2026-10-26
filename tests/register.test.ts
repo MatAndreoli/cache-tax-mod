@@ -260,6 +260,20 @@ describe('cache indicator', () => {
     expect(w.forks.length).toBe(1)
   })
 
+  test('the VS Code extension reports no surface and gets the row with a text icon', async ($, on) => {
+    mock.clock(on, { now: START })
+    const w = world(on, [], { env: { ...ONE_HOUR, CLAUDE_CODE_ENTRYPOINT: 'claude-vscode' } })
+    await $.session.start({ ...session, surface: null, isInteractive: true })
+    await $.turn.complete(turn())
+    await $.command.run(run('keepwarm', '90m'))
+    const ui = await $.ui.mount({ plugin: 'cache-tax', surface: 'vscode', component: 'AbovePrompt', props: bandProps })
+    expect(await ui.find({ type: 'Image' })).toBe(undefined)
+    expect(await ui.find({ type: 'Svg' })).toBe(undefined)
+    expect((await ui.find({ type: 'Text', text: /^\[>\]$/ }))?.props.bold).toBe(true)
+    expect((await ui.find({ type: 'Text', text: 'cache-tax' }))?.text).toMatch(/warm.*ping in 50m/)
+    expect(w.status.filter(text => text !== undefined)).toEqual([])
+  })
+
   for (const surface of ['vscode', 'mobile', null] as const) {
     test(`${surface ?? 'headless'} keeps the plain status fallback`, async ($, on) => {
       mock.clock(on, { now: START })

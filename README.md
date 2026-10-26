@@ -12,12 +12,30 @@ A two-line recap in a 330k-token session triggered a **$6.61 estimate**. After r
 
 Needs [Claude Code 2.1.287 or later](https://code.claude.com/docs/en/plugins/mods/overview#turn-mods-on-or-off), a one-hour cache and Claude Code left running. Mods are on by default. Pings cost tokens, including uncapped output.
 
+The repo is its own plugin marketplace (`.claude-plugin/marketplace.json`, named `cache-tax-mod`). From GitHub:
+
 ```sh
-claude plugin marketplace add karanb192/claude-code-mods
-claude plugin install cache-tax@claude-code-mods
+claude plugin marketplace add MatAndreoli/cache-tax-mod
+claude plugin install cache-tax@cache-tax-mod
+```
+
+From a company Bitbucket (or any other git host), pass the full git URL instead of `owner/repo`. Each user needs repository read access, the VPN on if it is required, and git credentials already working (`git ls-remote <url>` must succeed):
+
+```sh
+claude plugin marketplace add git@bitbucket.example.com:team/cache-tax-mod.git
+claude plugin install cache-tax@cache-tax-mod
 ```
 
 Restart Claude Code or run `/reload-plugins` in an open session. No early-access flag is needed. If you set `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS` previously, remove it; current Claude Code ignores it.
+
+To uninstall:
+
+```sh
+claude plugin uninstall cache-tax@cache-tax-mod
+claude plugin marketplace remove cache-tax-mod
+```
+
+To update, run `claude plugin marketplace update cache-tax-mod` and then `claude plugin update cache-tax@cache-tax-mod`; a release must bump `version` in both `.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json`. Background auto-update can fail on a host that needs interactive credentials, so update by hand there. Organization policy can restrict which marketplaces may be added. If you installed the upstream `cache-tax@claude-code-mods`, uninstall it first so only one guard is active.
 
 In a warm session, run `/keepwarm` to arm six hours. Use `/keepwarm 90m` for a shorter window, or `/keepwarm off` to stop.
 
@@ -64,7 +82,7 @@ The refusal, verbatim:
 
 The figure is an upper bound. The context count the engine reports for a resumed session is the last response's input, cache read, cache write and output together, and the resume payload carries no separate output count to take off; on one 15-day-old session the refusal said 330,316 tokens and $6.61 and the write that followed was 314k tokens, $6.28.
 
-While keepwarm is armed, the terminal and Desktop Code tab show a row above the prompt with the Cache Tax cube. Its lid is green for warm, orange for cold, and grey before the first turn or after compaction. The bold state label matches; the timer and receipt text use normal weight. Ghostty and kitty can draw the image; other terminals show `[>]` in its place. A nonempty `NO_COLOR` selects a bold text icon and an uncolored state label. The row also says `warm`, `cold` or `unknown`, so color is never the only signal. These states use the same one-hour clock as `/cache-tax`; they are estimates, not a live server cache check.
+While keepwarm is armed, the terminal, the Desktop Code tab and the VS Code extension show a row above the prompt with the Cache Tax cube. Its lid is green for warm, orange for cold, and grey before the first turn or after compaction. The bold state label matches; the timer and receipt text use normal weight. Ghostty and kitty can draw the image; other terminals and the VS Code extension show `[>]` in its place. A nonempty `NO_COLOR` selects a bold text icon and an uncolored state label. The row also says `warm`, `cold` or `unknown`, so color is never the only signal. These states use the same one-hour clock as `/cache-tax`; they are estimates, not a live server cache check.
 
 The row includes the warming window, next ping and last readback. A stopped loop shows a neutral symbol and its reason. `/keepwarm off` or an expired window removes the row. Surveys temporarily take priority, and other mods' content stays in the band. Sessions without this band retain the plain status text.
 
@@ -82,7 +100,7 @@ Validated on Claude Code 2.1.304:
 
     ❯ ./register.ts hooks: config.set{key=theme}, ui.render{component=AbovePrompt}, session.start, session.end, classic.SessionStart, command.run{command=keepwarm}, command.run{command=cache-tax}, prompt.submit, turn.step, turn.complete, session.compact
     ❯ ./register.ts calls: $.clock.after (via arm, ping), $.clock.now, $.command.list, $.command.register, $.config.list, $.env.get, $.model.fork (via ping), $.session.id (via reseat, seat), $.session.model (via seat), $.session.usage, $.store.delete (via endConversation, prune, startWindow, stop), $.store.get, $.store.set, $.ui.invalidate, $.ui.log, $.ui.resolve, $.ui.status
-    ❯ ./register.ts env reads: NO_COLOR, FORCE_PROMPT_CACHING_5M, CLAUDE_CODE_PROMPT_CACHE_TTL
+    ❯ ./register.ts env reads: NO_COLOR, CLAUDE_CODE_ENTRYPOINT, FORCE_PROMPT_CACHING_5M, CLAUDE_CODE_PROMPT_CACHE_TTL
 
 Reach L2, drives Claude. Sees every prompt you type, every model request's timing and every answer's token counts.
 
@@ -116,7 +134,12 @@ From a local checkout, load it for one session:
 
     claude --plugin-dir .
 
-To keep it installed, use the [marketplace commands](#install).
+To keep it installed from a local checkout, add the folder as a marketplace:
+
+    claude plugin marketplace add /path/to/cache-tax-mod
+    claude plugin install cache-tax@cache-tax-mod
+
+Check the manifests with `claude plugin validate .`.
 
 ## Prove it on your own session
 
@@ -136,7 +159,7 @@ claude plugin validate .claude-plugin/plugin.json
 claude plugin test .
 ```
 
-The [172 tests](tests/register.test.ts) use a mock clock and engine. They cover:
+The [173 tests](tests/register.test.ts) use a mock clock and engine. They cover:
 
 - **Guard:** refuse once and resend, warn mode, slash commands, small contexts, prompts nobody typed, resume seeding and cold-write scoring.
 - **Warming:** command defaults and refused windows and periods, always/off, always after `/clear`, always rolling from the last turn, idle resets, usage-based stopping, cold-window expiry and delayed timers after sleep.
