@@ -38,6 +38,13 @@ const PRICES: Array<[string | RegExp, number, number | null, number, number]> = 
 
 type PingRecord = { at: number; read: number; write: number; usd: number | null; warm: boolean }
 type Miss = { at: number; tokens: number; usd: number | null }
+/** How a fork ended. Only 'ok' answered; the others are billed when the engine reports a nonzero usage with them. */
+type PingStatus = 'ok' | 'empty' | 'aborted' | 'api-error'
+type PingCost = { at: number; status: PingStatus; input: number; read: number; write: number; output: number; usd: number | null }
+type PingTally = { count: number; failed: number; input: number; read: number; write: number; output: number; usd: number; priced: boolean }
+type ForkUsage = { input_tokens: number; output_tokens: number; cache_read_input_tokens: number; cache_creation_input_tokens: number }
+/** The most recent pings kept for /keepwarm status; the tally covers all of them. */
+const PING_LOG = 5
 type GuardMode = 'refuse' | 'warn'
 
 export type State = {
@@ -58,6 +65,8 @@ export type State = {
   misses: Miss[]
   pending: { cancel: () => void } | null
   last: PingRecord | null
+  pings: PingCost[]
+  pingTally: PingTally
   stopped: string | null
   waitForTurn: boolean
   retries: number
@@ -75,6 +84,8 @@ export type State = {
   ttlPinned: boolean
   ttlFound: boolean
 }
+
+export const emptyPingTally = (): PingTally => ({ count: 0, failed: 0, input: 0, read: 0, write: 0, output: 0, usd: 0, priced: true })
 
 const ttlOf = (s: State) => TTLS[s.ttl]
 const pingAfter = (s: State) => TTLS[s.ttl].pingAfter
@@ -143,6 +154,40 @@ function pingUsd(u: { input_tokens: number; output_tokens: number; cache_read_in
   return (u.cache_read_input_tokens * price[0] + u.cache_creation_input_tokens * price[1] + u.input_tokens * price[3] + u.output_tokens * price[2]) / 1e6
 }
 
+/** Adds one fork's billed usage to the session's ping log and tally. A failure that billed nothing (a refused request) is not a ping. */
+function recordPing(s: State, u: ForkUsage, status: PingStatus, at: number) {
+  if (status !== 'ok' && u.input_tokens + u.output_tokens + u.cache_read_input_tokens + u.cache_creation_input_tokens === 0) return
+  const price = priceOf(s.lastModel, s.ttl)
+  const usd = price ? pingUsd(u, price) : null
+  s.pings.push({ at, status, input: u.input_tokens, read: u.cache_read_input_tokens, write: u.cache_creation_input_tokens, output: u.output_tokens, usd })
+  if (s.pings.length > PING_LOG) s.pings.shift()
+  const t = s.pingTally
+  t.count++
+  if (status !== 'ok') t.failed++
+  t.input += u.input_tokens
+  t.read += u.cache_read_input_tokens
+  t.write += u.cache_creation_input_tokens
+  t.output += u.output_tokens
+  t.usd += usd ?? 0
+  t.priced = t.priced && usd !== null
+}
+
+function pingCounts(p: { input: number; read: number; write: number; output: number }, usd: number | null): string {
+  return `input ${fmtTok(p.input)} · read ${fmtTok(p.read)} · write ${fmtTok(p.write)} · output ${fmtTok(p.output)} · ${fmtUsd(usd)}`
+}
+
+/** The session's pings added up. */
+function pingTotalText(s: State): string {
+  const t = s.pingTally
+  if (!t.count) return 'none this session'
+  return `${t.count} ping${t.count === 1 ? '' : 's'}${t.failed ? ` (${t.failed} failed)` : ''} · ${pingCounts(t, t.priced ? t.usd : null)}`
+}
+
+/** The last few pings, newest last, one per line. */
+function pingLogLines(s: State, now: number): string[] {
+  return s.pings.map(p => `  ${fmtDuration(now - p.at)} ago ${p.status === 'ok' ? 'ok' : `failed (${p.status})`} · ${pingCounts(p, p.usd)}`)
+}
+
 /** The read-only upper bound: pings at the cache-read rate that cost as much as one cold write of the same context. */
 function breakEvenPings(s: State): number | null {
   const price = priceOf(s.lastModel, s.ttl)
@@ -185,6 +230,8 @@ export function resetForClear(s: State) {
   s.waitForTurn = false
   s.stepWrites = null
   s.steps = 0
+  s.pings = []
+  s.pingTally = emptyPingTally()
   outdate(s)
   disarm(s)
 }
@@ -411,6 +458,11 @@ async function ping($: EngineInterface, s: State) {
   const sent = await $.model.fork({ prompt: PING_PROMPT }).then(reply => ({ reply }), (err: unknown) => ({ err }))
   const at = await $.clock.now()
   s.inFlight = false
+  // Billed whatever happens next: a reply dropped as stale below was still paid for.
+  if ('reply' in sent && sent.reply && 'usage' in sent.reply) {
+    const r = sent.reply
+    recordPing(s, r.usage, r.isAnswered ? 'ok' : r.reason === 'api-error' ? 'api-error' : r.reason === 'aborted' ? 'aborted' : 'empty', at)
+  }
   // Checked after the last await. A stop, /clear, resume or compaction, or a main request that moved the
   // cache clock, replaced what this fork was sent for: its reply is dropped and the window armed afresh.
   if (gen !== s.gen || s.lastRequestAt !== sentAt) return s.pending ? undefined : arm($, s)
@@ -547,6 +599,7 @@ function card(s: State, now: number): string {
   if (pings != null) lines.push(`break-even  up to ${pings} pings at the read rate cost one cold write, about ${fmtDuration(pings * s.every)} of idle at one ping per ${fmtDuration(s.every)}`)
   lines.push(`guard       ${s.guard === 'refuse' ? 'refuse once (/cache-tax guard warn to only show the price)' : 'warn only (/cache-tax guard refuse to be stopped once)'}`)
   const paid = s.misses.reduce((a, m) => a + (m.usd ?? 0), 0)
+  lines.push(`pings       ${pingTotalText(s)}`)
   lines.push(`session     ${s.misses.length} cold write${s.misses.length === 1 ? '' : 's'} paid, ${fmtUsd(paid)}`)
   return lines.join('\n')
 }
@@ -554,7 +607,7 @@ function card(s: State, now: number): string {
 export function freshState(): State {
   return {
     hasBand: false, sid: '', deadline: 0, every: TTLS['1h'].pingAfter, always: false, lastRequestAt: 0, lastModel: null, ctx: 0, compacted: false,
-    resumedAt: 0, transcript: 0, guard: 'refuse', ackedAt: 0, coldWritePending: false, misses: [], pending: null, last: null, stopped: null,
+    resumedAt: 0, transcript: 0, guard: 'refuse', ackedAt: 0, coldWritePending: false, misses: [], pending: null, last: null, pings: [], pingTally: emptyPingTally(), stopped: null,
     waitForTurn: false, retries: 0, retryReason: '', gen: 0, tick: 0, offs: 0, turnOffs: null, inFlight: false, stepWrites: null, steps: 0, endingSid: '',
     ttl: '1h', refresh: null, ttlPinned: false, ttlFound: false,
   }
@@ -714,7 +767,9 @@ export const register: Register = on => {
       const rolls = s.always && (window < defaultWindow(s) || every !== pingAfter(s))
       return { text: armedText(s, now, window) + (rolls ? `. Always is on, so your next turn makes it at least ${fmtDuration(defaultWindow(s))} at one ping per ${fmtDuration(pingAfter(s))}` : '') }
     }
-    return { text: statusText(s, now) ?? 'keepwarm is off' }
+    const lines = [statusText(s, now) ?? 'keepwarm is off']
+    if (s.pingTally.count) lines.push(`pings ${pingTotalText(s)}`, ...pingLogLines(s, now))
+    return { text: lines.join('\n') }
   })
 
   on('command.run', { command: 'cache-tax' }, async ($, e) => {

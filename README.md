@@ -57,6 +57,15 @@ Windows belong to individual sessions. An already-cold session waits for your ne
 
 Sonnet 5, 16 September 2026: the status reported **75k tokens read at $0.02**. Nothing appeared in the conversation during the live run. This capture used the one-minute testing interval on 2.0.0; its card's $0.45 rewrite estimate used an older Sonnet price row, versus $0.30 for the same context with the current row. The two-cent ping is a receipt for that session, not a fixed price.
 
+### What the pings cost
+
+`/cache-tax` shows one line for the session, and `/keepwarm status` adds the last five pings:
+
+    pings       12 pings (1 failed) · input 24 · read 2.4M · write 0 · output 38 · $0.49
+    50m ago ok · input 2 · read 200k · write 0 · output 1 · $0.04
+
+Each figure is the usage the engine reports for the fork. Dollars are estimated from the price table at the model last seen, so a model with no row shows `n/a` while its tokens still count. A ping that billed tokens but did not answer (an empty reply, or one cut by an abort) counts as failed; a refused request that billed nothing, such as a 429, does not count. The tally lives in memory and `/clear` empties it. It is an estimate for this session, not your invoice.
+
 ## Why a short message can cost so much
 
 When the cached prefix expires, even “give me a recap” can trigger a rewrite of the old context before the answer. Cache Tax's Fable 5.1 price row compares a $20 one-hour write with a $0.25 cache read per million tokens: 80x per token, not 80x total savings. See the [pricing assumptions](#cost-and-the-plan-limit-question) and [Anthropic's price table](https://platform.claude.com/docs/en/about-claude/pricing).
@@ -69,9 +78,9 @@ New to caching? [Anthropic explains how Claude Code uses it](https://code.claude
     /keepwarm 90m           keep warm for a window of your own (also 2h30m, 6h)
     /keepwarm always        keep every session warm until six hours after its last turn, remembered across sessions
     /keepwarm 6h every 2m   pinging every two minutes; a testing knob, 1m to 59m, forgotten after this window (with always on, at your next turn)
-    /keepwarm status        the warming window, next ping and last receipt
+    /keepwarm status        the warming window, next ping, and this session's pings: a total and the last five
     /keepwarm off           stop, forget the window, and turn always off
-    /cache-tax              the card
+    /cache-tax              the card, with the session's ping total
     /cache-tax ttl 5m       assume a five-minute main cache (also 1h, or auto to read your Claude Code settings)
     /cache-tax guard warn   show the price and send (the hook's default)
     /cache-tax guard refuse drop a cold send once, the resend goes through (this mod's default)
@@ -159,7 +168,7 @@ claude plugin validate .claude-plugin/plugin.json
 claude plugin test .
 ```
 
-The [173 tests](tests/register.test.ts) use a mock clock and engine. They cover:
+The [183 tests](tests/register.test.ts) use a mock clock and engine. They cover:
 
 - **Guard:** refuse once and resend, warn mode, slash commands, small contexts, prompts nobody typed, resume seeding and cold-write scoring.
 - **Warming:** command defaults and refused windows and periods, always/off, always after `/clear`, always rolling from the last turn, idle resets, usage-based stopping, cold-window expiry and delayed timers after sleep.
@@ -168,6 +177,7 @@ The [173 tests](tests/register.test.ts) use a mock clock and engine. They cover:
 - **Pricing and display:** a row for every listed model at the one-hour and five-minute rates, models with no cache write, a model with no row, writes priced per request at each request's own model, output and uncached input costs, context counts, duration formatting and the read-only break-even figure.
 - **Indicator:** terminal images and desktop SVGs, theme selection, warm/cold transitions, resume, compaction, clear, expiry, surveys, other mods' content, text alternatives and `NO_COLOR` fallback.
 - **Preferences:** one read per session, immediate theme updates, denied changes and the effective theme returned by the settings writer.
+- **Ping cost tally:** pings added up per session (count, input, cache read, cache write, output, estimated dollars), the last five listed in `/keepwarm status`, a reply dropped as stale still counted, an empty or aborted ping counted as failed when it billed tokens, a refused request that billed nothing left out, a model with no price row shown as `n/a`, and `/clear` emptying it.
 - **Fork failures:** a busy API is retried while the cache is warm, a retry that wakes too late is dropped, nothing to fork waits for the next turn, one ping is out at a time, a reply that lands after a request, `/clear` or compaction is discarded, and other failures and the null result returned by older releases stop without retrying.
 
 The render tests check the element tree, not native terminal or desktop pixels. They do not validate server-side cache retention. See [the live check](#prove-it-on-your-own-session).

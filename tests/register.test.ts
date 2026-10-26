@@ -3,7 +3,7 @@ import type { Plugin, TestBody } from 'claude-code/testing'
 import type { CommandRunInput, ConfigSetInput, ModelForkResult, On, PromptSubmitInput, RenderPropsOf, SessionStartInput, TurnCompleteInput, TurnUsage } from 'claude-code'
 
 import { statusIcons } from '../hooks/status-icons'
-import { fmtClock, fmtDuration, freshState, parseDuration, resetForClear, seedFromResume } from '../hooks/register'
+import { emptyPingTally, fmtClock, fmtDuration, freshState, parseDuration, resetForClear, seedFromResume } from '../hooks/register'
 
 tier('user')
 
@@ -2495,5 +2495,129 @@ describe('the row shows seconds', () => {
     await clock.advance(15_000)
     expect((await $.command.run(run('keepwarm', 'status'))).text).toMatch(/^keepwarm 3h00m left · ping in 50m$/)
     expect(w.status.at(-1)).toMatch(/^keepwarm 3h00m left · ping in 50m$/)
+  })
+})
+
+describe('ping cost tally', () => {
+  const settle = () => new Promise<void>(r => { (globalThis as unknown as { setTimeout(fn: () => void, ms: number): unknown }).setTimeout(r, 20) })
+  const zero = { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }
+
+  test('the card adds up the session\'s pings and the status lists each one', async ($, on) => {
+    const clock = mock.clock(on, { now: START })
+    world(on, [{ read: 200000, write: 0, out: 1 }, { read: 200000, write: 0, out: 5 }])
+    await $.session.start(session)
+    await $.turn.complete(turn())
+    await $.command.run(run('keepwarm', '6h'))
+    await clock.advance(50 * MIN)
+    await clock.advance(50 * MIN)
+    const card = await $.command.run(run('cache-tax', ''))
+    expect(card.text).toMatch(/pings       2 pings · input 4 · read 400k · write 0 · output 6 · \$0\.08/)
+    const status = (await $.command.run(run('keepwarm', 'status'))).text
+    expect(status).toMatch(/\npings 2 pings · input 4 · read 400k/)
+    expect(status).toMatch(/\n  50m ago ok · input 2 · read 200k · write 0 · output 1 · \$0\.04/)
+    expect(status).toMatch(/\n  0m ago ok · input 2 · read 200k · write 0 · output 5 · \$0\.04/)
+  })
+
+  test('before any ping the card says none and the status stays a single line', async ($, on) => {
+    mock.clock(on, { now: START })
+    world(on, [])
+    await $.session.start(session)
+    await $.turn.complete(turn())
+    await $.command.run(run('keepwarm', '3h'))
+    expect((await $.command.run(run('cache-tax', ''))).text).toMatch(/pings       none this session/)
+    expect((await $.command.run(run('keepwarm', 'status'))).text).not.toMatch(/\n/)
+  })
+
+  test('the status keeps the last five pings while the tally counts all of them', async ($, on) => {
+    const clock = mock.clock(on, { now: START })
+    world(on, Array.from({ length: 7 }, () => warm))
+    await $.session.start(session)
+    await $.turn.complete(turn())
+    await $.command.run(run('keepwarm', '6h'))
+    for (let i = 0; i < 7; i++) await clock.advance(50 * MIN)
+    const status = (await $.command.run(run('keepwarm', 'status'))).text ?? ''
+    expect(status).toMatch(/\npings 7 pings · input 14 · read 1\.4M/)
+    expect(status.split('\n').filter(line => / ago ok · /.test(line)).length).toBe(5)
+  })
+
+  test('a reply that lands after a compaction was billed and still counts', async ($, on) => {
+    const clock = mock.clock(on, { now: START })
+    let release = () => {}
+    const w = world(on, [warm], { gate: () => new Promise<void>(r => { release = r }) })
+    await $.session.start(session)
+    await $.turn.complete(turn())
+    await $.command.run(run('keepwarm', '3h'))
+    await clock.advance(50 * MIN)
+    expect(w.forks.length).toBe(1)
+    await $.session.compact({ trigger: 'manual', messages: [{ role: 'user', text: 'summary', toolUses: [] }] })
+    release()
+    await settle()
+    expect((await $.command.run(run('cache-tax', ''))).text).toMatch(/pings       1 ping · input 2 · read 200k/)
+  })
+
+  test('an empty reply was billed: it counts as a failed ping', async ($, on) => {
+    const clock = mock.clock(on, { now: START })
+    world(on, [{ isAnswered: false, reason: 'empty-reply', usage: { ...zero, input_tokens: 2, output_tokens: 30, cache_read_input_tokens: 200000 } }])
+    await $.session.start(session)
+    await $.turn.complete(turn())
+    await $.command.run(run('keepwarm', '3h'))
+    await clock.advance(50 * MIN)
+    expect((await $.command.run(run('cache-tax', ''))).text).toMatch(/pings       1 ping \(1 failed\) · input 2 · read 200k · write 0 · output 30 · \$0\.04/)
+    expect((await $.command.run(run('keepwarm', 'status'))).text).toMatch(/\n  0m ago failed \(empty\) · input 2 · read 200k/)
+  })
+
+  test('an aborted ping keeps the usage that came back before the cut', async ($, on) => {
+    const clock = mock.clock(on, { now: START })
+    world(on, [{ isAnswered: false, reason: 'aborted', usage: { ...zero, cache_read_input_tokens: 100000 } }])
+    await $.session.start(session)
+    await $.turn.complete(turn())
+    await $.command.run(run('keepwarm', '3h'))
+    await clock.advance(50 * MIN)
+    expect((await $.command.run(run('cache-tax', ''))).text).toMatch(/pings       1 ping \(1 failed\) · input 0 · read 100k · write 0 · output 0 · \$0\.02/)
+  })
+
+  test('a refused request that billed nothing is retried and never counted', async ($, on) => {
+    const clock = mock.clock(on, { now: START })
+    const w = world(on, [{ isAnswered: false, reason: 'api-error', status: 429, error: 'rate_limit', usage: zero }, warm])
+    await $.session.start(session)
+    await $.turn.complete(turn())
+    await $.command.run(run('keepwarm', '3h'))
+    await clock.advance(50 * MIN)
+    await clock.advance(MIN)
+    expect(w.forks.length).toBe(2)
+    const card = (await $.command.run(run('cache-tax', ''))).text
+    expect(card).toMatch(/pings       1 ping · input 2 · read 200k/)
+    expect(card).not.toMatch(/failed/)
+  })
+
+  test('a model with no price row counts tokens and shows n/a', async ($, on) => {
+    const clock = mock.clock(on, { now: START })
+    world(on, [warm], { model: 'mystery-1' })
+    await $.session.start(session)
+    await $.turn.complete(turn({ usage: usage({ model: 'mystery-1' }) }))
+    await $.command.run(run('keepwarm', '3h'))
+    await clock.advance(50 * MIN)
+    expect((await $.command.run(run('cache-tax', ''))).text).toMatch(/pings       1 ping · input 2 · read 200k · write 0 · output 1 · n\/a/)
+  })
+
+  test('/clear forgets the pings', async ($, on) => {
+    const clock = mock.clock(on, { now: START })
+    world(on, [warm])
+    await $.session.start(session)
+    await $.turn.complete(turn())
+    await $.command.run(run('keepwarm', '3h'))
+    await clock.advance(50 * MIN)
+    expect((await $.command.run(run('cache-tax', ''))).text).toMatch(/pings       1 ping/)
+    await $.classic.SessionStart({ source: 'clear' })
+    expect((await $.command.run(run('cache-tax', ''))).text).toMatch(/pings       none this session/)
+  })
+
+  test('resetForClear empties the log and the tally', async () => {
+    const s = freshState()
+    s.pings = [{ at: START, status: 'ok', input: 2, read: 200000, write: 0, output: 1, usd: 0.04 }]
+    s.pingTally = { ...emptyPingTally(), count: 1, read: 200000, usd: 0.04 }
+    resetForClear(s)
+    expect(s.pings).toEqual([])
+    expect(s.pingTally).toEqual(emptyPingTally())
   })
 })
