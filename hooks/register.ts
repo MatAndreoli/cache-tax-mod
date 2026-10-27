@@ -1,89 +1,11 @@
 import type { EngineInterface, Register } from 'claude-code'
 import { statusIcons } from './status-icons'
+import {
+  BIG_TOKENS, KEY_ALWAYS, KEY_DEADLINE, KEY_EVERY, KEY_GUARD, KEY_TTL, MAX_RETRIES, MIN_PING_MS, PING_LOG, PING_PROMPT, PRICES, REFRESH_MS, TTLS, UNATTENDED,
+} from './constants'
+import type { ForkUsage, PingCost, PingStatus, PingTally, Price, ResumeFields, State, Ttl } from './types'
 
-const MIN_PING_MS = 60 * 1000
-const REFRESH_MS = 15 * 1000
-const MAX_RETRIES = 3
-// The main conversation's cache lifetime, with the ping period, default window and cold-write hold that suit it. A five-minute
-// cache is pinged every four minutes, so a window an hour long is already fifteen reads: the defaults are shorter than the hour's.
-type Ttl = '5m' | '1h'
-const TTLS: Record<Ttl, { ms: number; pingAfter: number; defaultWindow: number; autoWarm: number }> = {
-  '1h': { ms: 60 * 60 * 1000, pingAfter: 50 * 60 * 1000, defaultWindow: 6 * 60 * 60 * 1000, autoWarm: 3 * 60 * 60 * 1000 },
-  '5m': { ms: 5 * 60 * 1000, pingAfter: 4 * 60 * 1000, defaultWindow: 60 * 60 * 1000, autoWarm: 30 * 60 * 1000 },
-}
-const BIG_TOKENS = 50000
-const PING_PROMPT = 'Reply with the single word: warm'
-const KEY_DEADLINE = 'deadline'
-const KEY_EVERY = 'every'
-const KEY_GUARD = 'guard'
-const KEY_ALWAYS = 'always'
-const KEY_TTL = 'ttl'
-
-// Prompts no person sent, so nobody could send them again after a refusal. Every
-// other origin, including sdk, unclassified and the owner's own Slack or channel
-// messages, may carry a person's words and keeps the guard.
-const UNATTENDED = new Set(['task-notification', 'scheduled-trigger', 'peer', 'peer-send-message', 'projects-relay', 'coordinator', 'observer', 'observer-activity'])
-
-// $ per million tokens at the provider: [input, cache write for five minutes, cache read, output]. The write is null for a model that
-// cannot write a cache (its prompt caching is automatic), which then bills a cold send as plain input. A one-hour write is twice the input.
-// More specific families first: a model id takes the first row it matches, after the lowercasing and the dot-to-dash rewrite in priceOf.
-const PRICES: Array<[string | RegExp, number, number | null, number, number]> = [
-  ['haiku-5-5', 0.5, 0.63, 0.05, 2.5],
-  ['sonnet-5-5', 2, 2.5, 0.2, 10],
-  ['deepseek-v4-1-flash', 0.3, null, 0.01, 1.2],
-  ['deepseek-v4-flash', 0.19, null, 0.21, 0.51],
-  ['fw-glm-5-3-flash', 0.19, null, 0.04, 0.63],
-  ['gpt-6-luna', 0.1, 0.13, 0.01, 0.5],
-]
-
-type PingRecord = { at: number; read: number; write: number; usd: number | null; warm: boolean }
-type Miss = { at: number; tokens: number; usd: number | null }
-/** How a fork ended. Only 'ok' answered; the others are billed when the engine reports a nonzero usage with them. */
-type PingStatus = 'ok' | 'empty' | 'aborted' | 'api-error'
-type PingCost = { at: number; status: PingStatus; input: number; read: number; write: number; output: number; usd: number | null }
-type PingTally = { count: number; failed: number; input: number; read: number; write: number; output: number; usd: number; priced: boolean }
-type ForkUsage = { input_tokens: number; output_tokens: number; cache_read_input_tokens: number; cache_creation_input_tokens: number }
-/** The most recent pings kept for /keepwarm status; the tally covers all of them. */
-const PING_LOG = 5
-type GuardMode = 'refuse' | 'warn'
-
-export type State = {
-  hasBand: boolean
-  sid: string
-  deadline: number
-  every: number
-  always: boolean
-  lastRequestAt: number
-  lastModel: string | null
-  ctx: number
-  compacted: boolean
-  resumedAt: number
-  transcript: number
-  guard: GuardMode
-  ackedAt: number
-  coldWritePending: boolean
-  misses: Miss[]
-  pending: { cancel: () => void } | null
-  last: PingRecord | null
-  pings: PingCost[]
-  pingTally: PingTally
-  stopped: string | null
-  waitForTurn: boolean
-  retries: number
-  retryReason: string
-  gen: number
-  tick: number
-  offs: number
-  turnOffs: number | null
-  inFlight: boolean
-  stepWrites: StepWrites | null
-  steps: number
-  endingSid: string
-  ttl: Ttl
-  refresh: { cancel: () => void } | null
-  ttlPinned: boolean
-  ttlFound: boolean
-}
+export type { ResumeFields, State } from './types'
 
 export const emptyPingTally = (): PingTally => ({ count: 0, failed: 0, input: 0, read: 0, write: 0, output: 0, usd: 0, priced: true })
 
@@ -91,12 +13,6 @@ const ttlOf = (s: State) => TTLS[s.ttl]
 const pingAfter = (s: State) => TTLS[s.ttl].pingAfter
 const defaultWindow = (s: State) => TTLS[s.ttl].defaultWindow
 const autoWarm = (s: State) => TTLS[s.ttl].autoWarm
-
-/** What this turn's main requests wrote before any compaction it saw, priced per request where the steps reported usage. */
-type StepWrites = { tokens: number; usd: number; priced: boolean }
-
-/** [cache read, cache write at the TTL given, output, uncached input], $ per million tokens. */
-type Price = [number, number, number, number]
 
 function priceOf(model: string | null, ttl: Ttl): Price | null {
   const m = (model ?? '').toLowerCase().replace(/[\s.]+/g, '-')
@@ -132,11 +48,11 @@ export function fmtClock(ms: number): string {
 }
 
 function fmtUsd(usd: number | null): string {
-  return usd == null ? 'n/a' : '$' + (usd >= 100 ? usd.toFixed(0) : usd.toFixed(2))
+  return usd == null ? 'n/a' : '$' + (usd >= 100 ? usd.toFixed(0) : usd.toFixed(3))
 }
 
 function fmtTok(n: number): string {
-  return n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1000 ? Math.round(n / 1000) + 'k' : String(n)
+  return n >= 1e6 ? (n / 1e6).toFixed(3) + 'M' : n >= 1000 ? (n / 1000).toFixed(3) + 'k' : String(n)
 }
 
 function coldUsd(s: State): number | null {
@@ -154,12 +70,13 @@ function pingUsd(u: { input_tokens: number; output_tokens: number; cache_read_in
   return (u.cache_read_input_tokens * price[0] + u.cache_creation_input_tokens * price[1] + u.input_tokens * price[3] + u.output_tokens * price[2]) / 1e6
 }
 
-/** Adds one fork's billed usage to the session's ping log and tally. A failure that billed nothing (a refused request) is not a ping. */
-function recordPing(s: State, u: ForkUsage, status: PingStatus, at: number) {
-  if (status !== 'ok' && u.input_tokens + u.output_tokens + u.cache_read_input_tokens + u.cache_creation_input_tokens === 0) return
+/** Adds one fork's billed usage to the session's ping log and tally. A failure that billed nothing (a refused request) is not a ping: returns null. */
+function recordPing(s: State, u: ForkUsage, status: PingStatus, at: number): PingCost | null {
+  if (status !== 'ok' && u.input_tokens + u.output_tokens + u.cache_read_input_tokens + u.cache_creation_input_tokens === 0) return null
   const price = priceOf(s.lastModel, s.ttl)
   const usd = price ? pingUsd(u, price) : null
-  s.pings.push({ at, status, input: u.input_tokens, read: u.cache_read_input_tokens, write: u.cache_creation_input_tokens, output: u.output_tokens, usd })
+  const ping: PingCost = { at, status, input: u.input_tokens, read: u.cache_read_input_tokens, write: u.cache_creation_input_tokens, output: u.output_tokens, usd }
+  s.pings.push(ping)
   if (s.pings.length > PING_LOG) s.pings.shift()
   const t = s.pingTally
   t.count++
@@ -170,6 +87,14 @@ function recordPing(s: State, u: ForkUsage, status: PingStatus, at: number) {
   t.output += u.output_tokens
   t.usd += usd ?? 0
   t.priced = t.priced && usd !== null
+  return ping
+}
+
+/** The line a ping leaves in the conversation: one fixed prefix to grep a saved session for, the ping's own tokens and cost, then the session's running total. */
+function pingLogText(s: State, p: PingCost): string {
+  const t = s.pingTally
+  const total = `${t.count} so far · ${fmtUsd(t.priced ? t.usd : null)}`
+  return `cache-tax ping #${t.count} ${p.status === 'ok' ? 'ok' : `failed (${p.status})`} · ${s.lastModel ?? 'model unknown'} · ${pingCounts(p, p.usd)} · session ${total}`
 }
 
 function pingCounts(p: { input: number; read: number; write: number; output: number }, usd: number | null): string {
@@ -206,15 +131,6 @@ function guardText(s: State, now: number): string {
   return `the prompt cache went cold ${fmtDuration(now - s.lastRequestAt - ttlOf(s).ms)} ago. Sending this re-writes ` +
     `up to ${s.ctx.toLocaleString('en-US')} tokens at ${rate} = ${fmtUsd(coldUsd(s))}` +
     (warm == null ? '' : ` (a warm turn would have cost ${fmtUsd(warm)})`) + '.'
-}
-
-export type ResumeFields = {
-  source: string
-  model?: string
-  context_tokens?: number
-  seconds_since_last_response?: number
-  prompt_cache_likely_expired?: boolean
-  estimated_cache_write_usd?: number
 }
 
 /** /clear starts a new conversation in the same process; nothing priced before it still exists. */
@@ -461,7 +377,9 @@ async function ping($: EngineInterface, s: State) {
   // Billed whatever happens next: a reply dropped as stale below was still paid for.
   if ('reply' in sent && sent.reply && 'usage' in sent.reply) {
     const r = sent.reply
-    recordPing(s, r.usage, r.isAnswered ? 'ok' : r.reason === 'api-error' ? 'api-error' : r.reason === 'aborted' ? 'aborted' : 'empty', at)
+    const recorded = recordPing(s, r.usage, r.isAnswered ? 'ok' : r.reason === 'api-error' ? 'api-error' : r.reason === 'aborted' ? 'aborted' : 'empty', at)
+    // Logged where it is billed, so a stale or failed ping is in the conversation too, and the session shows every ping its tally counts.
+    if (recorded) $.ui.log(pingLogText(s, recorded))
   }
   // Checked after the last await. A stop, /clear, resume or compaction, or a main request that moved the
   // cache clock, replaced what this fork was sent for: its reply is dropped and the window armed afresh.

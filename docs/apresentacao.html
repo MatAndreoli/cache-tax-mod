@@ -264,6 +264,7 @@ input[type=range] { width: 100%; accent-color: var(--accent); }
       <a href="#funcionamento">Funcionamento</a>
       <a href="#comandos">Comandos</a>
       <a href="#custo">Custo dos pings</a>
+      <a href="#reais">Sessões reais</a>
       <a href="#calculadora">Calculadora</a>
       <a href="#saudavel">Tempo saudável</a>
       <a href="#limites">Limites</a>
@@ -595,6 +596,73 @@ pings 5 pings · input 80 · read 617k · write 200 · output 20 · $0.12
       <table id="tbl"></table>
     </div>
     <p class="note" style="margin-top:12px">Contexto de 200k no Sonnet 5.5. O ping inclui os 16 tokens de input e os 4 de output observados na sessão real. Se a pausa for menor que o TTL, o cache sobrevive sozinho e o keepwarm gastaria pings à toa.</p>
+  </div>
+</section>
+
+<!-- 13 · sessões reais: custo de começar -->
+<section class="slide" id="reais" data-nav="reais" data-title="Sessões reais: custo de começar">
+  <div class="wrap">
+    <div class="eyebrow">Sessões reais · custo de começar</div>
+    <h2>Chegar aos 200k já custa uma escrita fria</h2>
+    <p class="lead" style="margin-bottom:20px">Nas sessões medidas, o prefixo fixo (prompt do sistema, ferramentas, CLAUDE.md) já ocupa de 104k a 115k tokens antes da primeira pergunta.</p>
+    <div class="assume" aria-label="Custo inicial">
+      <div><small>Prefixo fixo</small><b>~110k tokens</b></div>
+      <div><small>1ª escrita · 5m</small><b>≈ US$ 0,26</b></div>
+      <div><small>Até 200k · 5m</small><b>US$ 0,50</b></div>
+      <div><small>Até 200k · 1h</small><b>US$ 0,80</b></div>
+    </div>
+    <div class="pair">
+      <div class="panel">
+        <h3>O que isso significa</h3>
+        <p>Somando todas as escritas incrementais até o contexto chegar a 200k, o gasto é o mesmo de reescrever 200k de uma vez. Começar uma sessão e perder o cache no meio custam, portanto, a mesma coisa.</p>
+      </div>
+      <div class="panel">
+        <h3>Por que importa para o mod</h3>
+        <p>Cada pausa maior que o TTL repete esse custo inteiro. Nas sessões sem o mod, as reescritas frias foram de 32% a 44% do custo total da sessão principal.</p>
+      </div>
+    </div>
+    <p class="note" style="margin-top:14px">Preços do Sonnet 5.5. Dados de sessões reais do autor, lidos dos registros de uso do Claude Code.</p>
+  </div>
+</section>
+
+<!-- 14 · sessões reais: economia -->
+<section class="slide" id="reais-economia" data-nav="reais" data-title="Sessões reais: economia">
+  <div class="wrap">
+    <div class="eyebrow">Sessões reais · só a sessão principal</div>
+    <h2>Cerca de US$ 0,65 evitados por pausa, com ~300k de contexto</h2>
+    <p>O mod age só na sessão principal, então a conta ignora os subagentes. Para cada pausa de 5 min ou mais, troca-se uma escrita fria por uma leitura e descontam-se os pings (estimados).</p>
+    <div class="tbl">
+      <table>
+        <thead><tr><th>Execução (build)</th><th class="n">Pausas ≥ 5 min</th><th class="n">Sem mod</th><th class="n">Com mod</th><th class="n">Economia</th></tr></thead>
+        <tbody>
+          <tr><td>A · pausas da própria run</td><td class="n">3</td><td class="n">US$ 5,26</td><td class="n">US$ 3,31</td><td class="n">−37%</td></tr>
+          <tr><td>B · pausas da própria run</td><td class="n">3</td><td class="n">US$ 5,20</td><td class="n">US$ 3,55</td><td class="n">−32%</td></tr>
+          <tr><td>C · pausas da própria run</td><td class="n">1</td><td class="n">US$ 4,00</td><td class="n">US$ 3,54</td><td class="n">−12%</td></tr>
+          <tr><td>D · pausas da própria run</td><td class="n">1</td><td class="n">US$ 3,29</td><td class="n">US$ 3,02</td><td class="n">−8%</td></tr>
+          <tr><td><b>As quatro juntas</b></td><td class="n">8</td><td class="n">US$ 4,44</td><td class="n">US$ 3,35</td><td class="n"><b>−24%</b></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="note" style="margin-top:12px">A economia vai de −8% a −37% porque cresce com o número de pausas, não com o mod. Nas execuções refinamento (1 pausa cada, 10 a 22 min) ficou entre −19% e −22%. Poucas execuções, não controladas; os pings não aparecem nos registros e foram estimados.</p>
+  </div>
+</section>
+
+<!-- 15 · sessões reais: cauda dos pings -->
+<section class="slide" id="reais-cauda" data-nav="reais" data-title="Sessões reais: cauda dos pings">
+  <div class="wrap">
+    <div class="eyebrow">Sessões reais · a cauda dos pings</div>
+    <h2>Se o Claude Code ficar aberto, os pings continuam depois do último turno</h2>
+    <div class="pair" style="margin-bottom:18px">
+      <div class="panel">
+        <div class="big" style="color:var(--s-5m)">US$ 0,60–0,99<small>cache 5m · até 14 pings</small></div>
+        <p class="note" style="margin-top:12px">No modo <code>always</code>, o mod pinga até o fim da janela de 1h depois do último turno.</p>
+      </div>
+      <div class="panel">
+        <div class="big" style="color:var(--s-1h)">US$ 0,30–0,49<small>cache 1h · até 7 pings</small></div>
+        <p class="note" style="margin-top:12px">Na janela de 6h do cache de 1h, são menos pings, porque cada um cobre 50 minutos.</p>
+      </div>
+    </div>
+    <p>Cada ping real custou cerca de US$ 0,06 com ~300k de contexto e US$ 0,08 com ~390k. É um limite superior: se você fecha o Claude Code ao terminar, não há cauda. Com a cauda inteira, a economia de −34% nas pausas das execuções A e B cairia para algo perto de −16%.</p>
   </div>
 </section>
 
